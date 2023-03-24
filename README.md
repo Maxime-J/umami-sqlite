@@ -46,5 +46,5 @@ For non raw db requests (concerning mainly realtime data), needed manipulations 
 `uniexpoch` function is not supported in the SQLite version shipped with Prisma, `strftime` is used instead.
 
 SQLite documentation:\
-https://www.sqlite.org/lang_datefunc.html\
+https://www.sqlite.org/lang_datefunc.html \
 https://www.sqlite.org/json1.html
