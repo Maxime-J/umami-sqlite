@@ -9,7 +9,7 @@ Can't guarantee migration scripts between major ones will be provided (eg. v1 to
 
 ## Why not a fork ?
 A way to keep the official repository as the main source.\
-Plus, I consider this as an experimental feature, whereas being totally stable and usable (I use it myself in production).
+Plus, I consider this as an experimental feature, whereas being totally stable and useable (I use it myself in production).
 
 ## How ?
 The following has to be done before building Umami:
