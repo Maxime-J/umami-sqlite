@@ -1,4 +1,4 @@
-# SQLite support for Umami
+# SQLite support for [Umami](https://github.com/umami-software/umami)
 
 This repository contains patches to bring SQLite support to Umami, keeping all other features intact.\
 Patches are named after the supported, tested Umami version.
