@@ -266,7 +266,7 @@ index e58a18c8..eccf5152 100644
    }
  
 diff --git a/lib/prisma.js b/lib/prisma.js
-index 27602ff5..ebbb75e2 100644
+index 27602ff5..888dc0eb 100644
 --- a/lib/prisma.js
 +++ b/lib/prisma.js
 @@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
@@ -282,7 +282,7 @@ index 27602ff5..ebbb75e2 100644
    year: 'YYYY-01-01',
  };
  
-+export const SQLITE_DATE_FORMATS = {
++const SQLITE_DATE_FORMATS = {
 +  minute: '%Y-%m-%d %H:%M:00',
 +  hour: '%Y-%m-%d %H:00:00',
 +  day: '%Y-%m-%d',
