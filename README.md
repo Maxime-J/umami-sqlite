@@ -38,10 +38,10 @@ Which is a lot to maintain, and a cool thing (not to mention their dedication to
 Thanks to them for all of that!
 
 ## SQLite specificities
-Time data is stored as integer in epoch format.\
-JSON data is stringified.
+Time data is stored as integer in epoch format (SQLite doesn't have a storage class set aside for dates/times).\
+Data intended to be stored with JSON Prisma field is stored as text, using `JSON.stringify` (JSON field with SQLite isn't supported by Prisma https://github.com/prisma/prisma/issues/3786).
 
-For non raw db requests (concerning mainly realtime data), needed manipulations are done with Prisma Client extensions (https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions).
+For non raw db requests, needed manipulations are done with Prisma Client extensions feature (https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions).
 
 `uniexpoch` function is not supported in the SQLite version shipped with Prisma, `strftime` is used instead.
 
