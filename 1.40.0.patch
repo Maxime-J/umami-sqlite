@@ -4,9 +4,9 @@
  db/sqlite/schema.prisma                    | 104 +++++++++++++++++++++
  lib/db.js                                  |   7 +-
  lib/prisma.js                              |  77 ++++++++++++++-
- scripts/check-db.js                        |  11 +++
+ scripts/check-db.js                        |  14 +++
  scripts/copy-db-files.js                   |   6 +-
- 7 files changed, 296 insertions(+), 7 deletions(-)
+ 7 files changed, 299 insertions(+), 7 deletions(-)
  create mode 100644 db/sqlite/migrations/01_init/migration.sql
  create mode 100644 db/sqlite/migrations/migration_lock.toml
  create mode 100644 db/sqlite/schema.prisma
@@ -409,24 +409,27 @@ index 27602ff5..888dc0eb 100644
    return prisma.$queryRawUnsafe.apply(prisma, [sql, ...params]);
  }
 diff --git a/scripts/check-db.js b/scripts/check-db.js
-index d5cc2a64..123556dd 100644
+index d5cc2a64..b16ea0f1 100644
 --- a/scripts/check-db.js
 +++ b/scripts/check-db.js
-@@ -48,6 +48,17 @@ async function checkTables() {
+@@ -48,6 +48,20 @@ async function checkTables() {
      console.log('Adding tables...');
  
      console.log(execSync('prisma migrate deploy').toString());
-+    const { hashPassword } = require('next-basics');
-+    const { v4 } = require('uuid');
-+    console.log('Adding admin user...');
-+    await prisma.account.create({
-+      data: {
-+        username: 'admin',
-+        password: hashPassword('umami'),
-+        accountUuid: v4(),
-+        isAdmin: true,
-+      }
-+    });
++    const dbType = process.env.DATABASE_URL.split(':')[0];
++    if (dbType === 'file') {
++      const { hashPassword } = require('next-basics');
++      const { v4 } = require('uuid');
++      console.log('Adding admin user...');
++      await prisma.account.create({
++        data: {
++          username: 'admin',
++          password: hashPassword('umami'),
++          accountUuid: v4(),
++          isAdmin: true,
++        }
++      });
++    }
    }
  }
  
