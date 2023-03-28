@@ -37,10 +37,10 @@ Probably not, they already support multiple databases, and have their cloud offe
 Which is a lot to maintain, and a cool thing (not to mention that it's open source).\
 Thanks to them for all of that!
 
-Moreover, SQLite has some technical aspects which does't make it a very good candidate for Umami's usage.
+Moreover, SQLite has some technical aspects which don't make it a very good candidate for Umami's usage.
 
 ## SQLite specificities
-Time data is stored as integer in epoch format (SQLite doesn't have a storage class set aside for dates/times).
+Time data is stored as integer in Unix timestamp format (SQLite doesn't have a storage class set aside for dates/times).
 
 Initial admin user is added through `scripts/check-db.js` in order to have a non fixed, app generated uuid (SQLite doesn't natively support UUIDs).
 
