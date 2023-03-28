@@ -34,16 +34,21 @@ Then download and apply the new patch.
 
 ## Will Umami support it?
 Probably not, they already support multiple databases, and have their cloud offer.\
-Which is a lot to maintain, and a cool thing (not to mention their dedication to open-source).\
+Which is a lot to maintain, and a cool thing (not to mention that it's open source).\
 Thanks to them for all of that!
 
+Moreover, SQLite has some technical aspects which does't make it a very good candidate for Umami's usage.
+
 ## SQLite specificities
-Time data is stored as integer in epoch format (SQLite doesn't have a storage class set aside for dates/times).\
+Time data is stored as integer in epoch format (SQLite doesn't have a storage class set aside for dates/times).
+
+Initial admin user is added through `scripts/check-db.js` in order to have a non fixed, app generated uuid (SQLite doesn't natively support UUIDs).
+
 Data intended to be stored with JSON Prisma field is stored as text, using `JSON.stringify` (JSON field with SQLite isn't supported by Prisma https://github.com/prisma/prisma/issues/3786).
 
-For non raw db requests, needed manipulations are done with Prisma Client extensions feature (https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions).
-
 `uniexpoch` function is not supported in the SQLite version shipped with Prisma, `strftime` is used instead.
+
+For non raw db requests, needed manipulations are done with Prisma Client extensions feature (https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions).
 
 SQLite documentation:\
 https://www.sqlite.org/lang_datefunc.html \
