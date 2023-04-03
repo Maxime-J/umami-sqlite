@@ -24,6 +24,8 @@ Path can be absolute `DATABASE_URL=file:/absolute/path/to/database.db`\
 or relative `DATABASE_URL=file:./database.db`.\
 In normal conditions, a relative path is relative to the prisma folder, but not necesseraly, so an absolute one is recommended.
 
+Using Docker, that path should likely lead to the mount point of a volume, for data persistence.
+
 ## How to update ?
 Reverse the patch before pulling updates
 ```
