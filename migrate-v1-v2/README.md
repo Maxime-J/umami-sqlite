@@ -10,7 +10,7 @@
 
 After making a copy of the database (obviously not mandatory, but so simple to do with SQLite),
 
-put `migrate-v1-v2` folder inside Umami 1.40.0 folder\
+put `migrate-v1-v2` folder inside Umami 1.40.0 folder\,
 and run from there (Umami's root):
 
 ```
