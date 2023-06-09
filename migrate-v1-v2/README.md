@@ -3,7 +3,7 @@
 *Adapted from https://github.com/umami-software/migrate-v1-v2/*
 
 **Important:**
-- Any event data will not be migrated into v2, nor keeped in a specific table.
+- Any event data will not be migrated into v2, nor kept in a specific table.
 - v1 tables are all dropped after the migration is complete.
 
 **Running migration:**
