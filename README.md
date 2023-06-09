@@ -1,11 +1,9 @@
 # SQLite support for [Umami](https://github.com/umami-software/umami)
-
 This repository contains patches to bring SQLite support to Umami, keeping all other features intact.\
 Patches are named after the supported, tested Umami version.
 
-One patch file per major version.\
-Updates will be supported within each.\
-Can't guarantee migration scripts between major ones will be provided (eg. v1 to v2)
+One patch file per major version, renamed on a new update.\
+Needed migration scripts provided in their own folder (see README inside for instructions).
 
 ## Why not a fork ?
 A way to keep the official repository as the main source.\
@@ -35,23 +33,24 @@ git pull
 Then download and apply the new patch.
 
 ## Will Umami support it?
-Probably not, they already support multiple databases, and have their cloud offer.\
-Which is a lot to maintain, and a cool thing (not to mention that it's open source).\
+Probably not, they already support multiple databases, and run their cloud offer.\
+Which is already a cool thing (not to mention that it's open source).\
 Thanks to them for all of that!
 
 Moreover, SQLite has some technical aspects which don't make it a very good candidate for Umami's usage.
 
-## SQLite specificities
+## SQLite specificities in latest version
+
 Time data is stored as integer in Unix timestamp format (SQLite doesn't have a storage class set aside for dates/times).
-
-Initial admin user is added through `scripts/check-db.js` in order to have a non fixed, app generated uuid (SQLite doesn't natively support UUIDs).
-
-Data intended to be stored with JSON Prisma field is stored as text, using `JSON.stringify` (JSON field with SQLite isn't supported by Prisma https://github.com/prisma/prisma/issues/3786).
 
 `uniexpoch` function is not supported in the SQLite version shipped with Prisma, `strftime` is used instead.
 
-For non raw db requests, needed manipulations are done with Prisma Client extensions feature (https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions).
+updatedAt timestamps are handled manually for them to have the appropriate format (@updatedAt removed in Prisma schema).
+
+Prisma client `createMany` query isn't supported with SQLite, an equivalent function is added.
+
+Needed format manipulations are done with Prisma Client extensions feature (https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions).\
+This is handled in `lib/prisma-client.ts`, brought it back from @umami/prisma-client.
 
 SQLite documentation:\
-https://www.sqlite.org/lang_datefunc.html \
-https://www.sqlite.org/json1.html
+https://www.sqlite.org/lang_datefunc.html
