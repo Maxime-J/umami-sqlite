@@ -49,7 +49,7 @@ updatedAt timestamps are handled manually for them to have the appropriate forma
 
 Prisma client `createMany` query isn't supported with SQLite, an equivalent function is added.
 
-Needed format manipulations are done with Prisma Client extensions feature (https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions).\
+Needed format manipulations are done with Prisma Client extensions feature ([https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions](https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions)).\
 This is handled in `lib/prisma-client.ts`, brought it back from @umami/prisma-client.
 
 SQLite documentation:\
