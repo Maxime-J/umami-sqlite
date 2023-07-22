@@ -1,13 +1,12 @@
 # SQLite support for [Umami](https://github.com/umami-software/umami)
-This repository contains patches to bring SQLite support to Umami, keeping all other features intact.\
-Patches are named after the supported, tested Umami version.
+This repository contains a patch to bring SQLite support to Umami, keeping all other features intact.\
+Patch is named after the supported, tested Umami released version.
 
-One patch file per major version, renamed on a new update.\
-Needed migration scripts provided in their own folder (see README inside for instructions).
+Updates are supported, and eventually needed scripts are provided with their README in the scripts folder.
 
 ## Why not a fork ?
 A way to keep the official repository as the main source.\
-Plus, I consider this as an experimental feature, whereas being totally stable and useable (I use it myself in production).
+Plus, although being totally stable and useable, I consider this an experimental feature, which requires some workarounds.
 
 ## How ?
 The following has to be done before building Umami:
@@ -32,7 +31,7 @@ git pull
 ```
 Then download and apply the new patch.
 
-## Will Umami support it?
+## Could Umami support it ?
 Probably not, they already support multiple databases, and run their cloud offer.\
 Which is already a cool thing (not to mention that it's open source).\
 Thanks to them for all of that!
@@ -40,7 +39,6 @@ Thanks to them for all of that!
 Moreover, SQLite has some technical aspects which don't make it a very good candidate for Umami's usage.
 
 ## SQLite specificities in latest version
-
 Time data is stored as integer in Unix timestamp format (SQLite doesn't have a storage class set aside for dates/times).
 
 `uniexpoch` function is not supported in the SQLite version shipped with Prisma, `strftime` is used instead.
