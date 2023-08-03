@@ -41,14 +41,14 @@ Moreover, SQLite has some technical aspects which don't make it a very good cand
 ## SQLite specificities in latest version
 Time data is stored as integer in Unix timestamp format (SQLite doesn't have a storage class set aside for dates/times).
 
-`uniexpoch` function is not supported in the SQLite version shipped with Prisma, `strftime` is used instead.
-
-updatedAt timestamps are handled manually for them to have the appropriate format (@updatedAt removed in Prisma schema).
+updatedAt timestamps are handled manually for them to have the appropriate format (no @updatedAt in Prisma schema).
 
 Prisma client `createMany` query isn't supported with SQLite, an equivalent function is added.
 
 Needed format manipulations are done with Prisma Client extensions feature ([https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions](https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions)).\
 This is handled in `lib/prisma-client.ts`, brought back from @umami/prisma-client.
 
-SQLite documentation:\
-https://www.sqlite.org/lang_datefunc.html
+`sqlite-vacuum.js` is added in Umami scripts folder to execute VACUUM command on the database. You might want to launch it sometimes:
+>-Frequent inserts, updates, and deletes can cause the database file to become fragmented - where data for a single table or index is scattered around the database file. Running VACUUM ensures that each table and index is largely stored contiguously within the database file. In some cases, VACUUM may also reduce the number of partially filled pages in the database, reducing the size of the database file further.
+>
+>-When content is deleted from an SQLite database, the content is not usually erased but rather the space used to hold the content is marked as being available for reuse. [...] Running VACUUM will clean the database of all traces of deleted content.
