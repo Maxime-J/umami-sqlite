@@ -31,10 +31,12 @@ Probably not, they already support multiple databases, and run their cloud offer
 Which is already a cool thing (not to mention that it's open source).\
 Thanks to them for all of that!
 
-Moreover, SQLite has some technical aspects which don't make it a very good candidate for Umami's usage.
+Moreover, SQLite isn't totally on par feature wise with PostgreSQL and MySQL in Prisma (the ORM used for relational dbs).
 
 ## SQLite specificities in latest version
-Prisma stores time data as an Unix timestamp in ms (as in _prisma_migrations table).\
+Rowid tables are used ([https://www.sqlite.org/rowidtable.html](https://www.sqlite.org/rowidtable.html)), WITHOUT ROWID leading to a larger database file with Umami.
+
+Prisma stores time data as an Unix timestamp in ms.\
 Umami with SQLite stores it as integer in seconds, for convenience.\
 (SQLite doesn't have a storage class set aside for dates/times).
 
@@ -42,7 +44,7 @@ updatedAt timestamps are handled manually for them to have the appropriate forma
 
 Prisma client `createMany` query isn't supported with SQLite, an equivalent function is added.
 
-All of this is mainly handled in `lib/prisma-client.ts`, brought back from @umami/prisma-client, and includes the use of Prisma Client extensions feature ([https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions](https://www.prisma.io/docs/concepts/components/prisma-client/client-extensions)).
+All of this is mainly handled in `lib/prisma-client.ts`, brought back from @umami/prisma-client, using Prisma Client extensions feature.
 
 `sqlite-vacuum.js` is added in Umami scripts folder to execute VACUUM command on the database. You might want to launch it sometimes:
 >-Frequent inserts, updates, and deletes can cause the database file to become fragmented - where data for a single table or index is scattered around the database file. Running VACUUM ensures that each table and index is largely stored contiguously within the database file. In some cases, VACUUM may also reduce the number of partially filled pages in the database, reducing the size of the database file further.
