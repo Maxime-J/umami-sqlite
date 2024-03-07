@@ -34,10 +34,10 @@ Thanks to them for all of that!
 Moreover, SQLite isn't totally on par feature wise with PostgreSQL and MySQL in Prisma (the ORM used for relational dbs).
 
 ## SQLite specificities in latest version
-Rowid tables are used ([https://www.sqlite.org/rowidtable.html](https://www.sqlite.org/rowidtable.html)), WITHOUT ROWID leading to a larger database file with Umami.
+Rowid tables are used, WITHOUT ROWID leading to a larger database file with Umami.
 
-Prisma stores time data as an Unix timestamp in ms.\
-Umami with SQLite stores it as integer in seconds, for convenience.\
+Using SQLite, Prisma stores `DateTime` fields as Unix timestamps in ms.\
+This patch uses an `Int` field for time data, storing it as Unix timestamp in seconds, for convenience with the date functions in use.\
 (SQLite doesn't have a storage class set aside for dates/times).
 
 updatedAt timestamps are handled manually for them to have the appropriate format.
