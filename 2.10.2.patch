@@ -1,0 +1,1304 @@
+---
+ db/sqlite/migrations/01_init/migration.sql    | 127 +++++++++++
+ .../02_1_unixepoch_availability/migration.sql |  15 ++
+ .../migration.sql                             |  49 ++++
+ .../03_metric_performance_index/migration.sql |  50 ++++
+ .../04_1_indexes_tables/migration.sql         | 206 +++++++++++++++++
+ .../migrations/04_team_redesign/migration.sql |  31 +++
+ db/sqlite/migrations/migration_lock.toml      |   3 +
+ db/sqlite/schema.prisma                       | 213 ++++++++++++++++++
+ scripts/check-db.js                           |  33 +--
+ scripts/copy-db-files.js                      |   6 +-
+ scripts/sqlite-vacuum.js                      |  10 +
+ src/lib/db.ts                                 |   7 +-
+ src/lib/prisma-client.ts                      | 131 +++++++++++
+ src/lib/prisma.ts                             |  38 +++-
+ src/queries/admin/team.ts                     |   7 +-
+ src/queries/admin/user.ts                     |   4 +-
+ src/queries/admin/website.ts                  |   4 +-
+ .../analytics/eventData/saveEventData.ts      |   2 +-
+ src/queries/analytics/events/getEvents.ts     |   2 +-
+ src/queries/analytics/getWebsiteDateRange.ts  |   6 +-
+ src/queries/analytics/sessions/getSessions.ts |   2 +-
+ .../analytics/sessions/saveSessionData.ts     |   2 +-
+ 22 files changed, 912 insertions(+), 36 deletions(-)
+ create mode 100644 db/sqlite/migrations/01_init/migration.sql
+ create mode 100644 db/sqlite/migrations/02_1_unixepoch_availability/migration.sql
+ create mode 100644 db/sqlite/migrations/02_report_schema_session_data/migration.sql
+ create mode 100644 db/sqlite/migrations/03_metric_performance_index/migration.sql
+ create mode 100644 db/sqlite/migrations/04_1_indexes_tables/migration.sql
+ create mode 100644 db/sqlite/migrations/04_team_redesign/migration.sql
+ create mode 100644 db/sqlite/migrations/migration_lock.toml
+ create mode 100644 db/sqlite/schema.prisma
+ create mode 100644 scripts/sqlite-vacuum.js
+ create mode 100644 src/lib/prisma-client.ts
+
+diff --git a/db/sqlite/migrations/01_init/migration.sql b/db/sqlite/migrations/01_init/migration.sql
+new file mode 100644
+index 00000000..57c1fd1b
+--- /dev/null
++++ b/db/sqlite/migrations/01_init/migration.sql
+@@ -0,0 +1,127 @@
++-- CreateTable
++CREATE TABLE `user` (
++    `user_id` TEXT PRIMARY KEY NOT NULL,
++    `username` TEXT NOT NULL,
++    `password` TEXT NOT NULL,
++    `role` TEXT NOT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now')),
++    `updated_at` INTEGER NULL,
++    `deleted_at` INTEGER NULL
++);
++CREATE UNIQUE INDEX `user_user_id_key` ON `user`(`user_id`);
++CREATE UNIQUE INDEX `user_username_key` ON `user`(`username`);
++
++-- CreateTable
++CREATE TABLE `session` (
++    `session_id` TEXT PRIMARY KEY NOT NULL,
++    `website_id` TEXT NOT NULL,
++    `hostname` TEXT NULL,
++    `browser` TEXT NULL,
++    `os` TEXT NULL,
++    `device` TEXT NULL,
++    `screen` TEXT NULL,
++    `language` TEXT NULL,
++    `country` TEXT NULL,
++    `subdivision1` TEXT NULL,
++    `subdivision2` TEXT NULL,
++    `city` TEXT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now'))
++);
++CREATE UNIQUE INDEX `session_session_id_key` ON `session`(`session_id`);
++CREATE INDEX `session_created_at_idx` ON `session`(`created_at`);
++CREATE INDEX `session_website_id_idx` ON `session`(`website_id`);
++
++-- CreateTable
++CREATE TABLE `website` (
++    `website_id` TEXT PRIMARY KEY NOT NULL,
++    `name` TEXT NOT NULL,
++    `domain` TEXT NULL,
++    `share_id` TEXT NULL,
++    `reset_at` INTEGER NULL,
++    `user_id` TEXT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now')),
++    `updated_at` INTEGER NULL,
++    `deleted_at` INTEGER NULL
++);
++CREATE UNIQUE INDEX `website_website_id_key` ON `website`(`website_id`);
++CREATE UNIQUE INDEX `website_share_id_key` ON `website`(`share_id`);
++CREATE INDEX `website_user_id_idx` ON `website`(`user_id`);
++CREATE INDEX `website_created_at_idx` ON `website`(`created_at`);
++CREATE INDEX `website_share_id_idx` ON `website`(`share_id`);
++
++-- CreateTable
++CREATE TABLE `website_event` (
++    `event_id` TEXT PRIMARY KEY NOT NULL,
++    `website_id` TEXT NOT NULL,
++    `session_id` TEXT NOT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now')),
++    `url_path` TEXT NOT NULL,
++    `url_query` TEXT NULL,
++    `referrer_path` TEXT NULL,
++    `referrer_query` TEXT NULL,
++    `referrer_domain` TEXT NULL,
++    `page_title` TEXT NULL,
++    `event_type` INTEGER UNSIGNED NOT NULL DEFAULT 1,
++    `event_name` TEXT NULL
++);
++CREATE INDEX `website_event_created_at_idx` ON `website_event`(`created_at`);
++CREATE INDEX `website_event_session_id_idx` ON `website_event`(`session_id`);
++CREATE INDEX `website_event_website_id_idx` ON `website_event`(`website_id`);
++CREATE INDEX `website_event_website_id_created_at_idx` ON `website_event`(`website_id`, `created_at`);
++CREATE INDEX `website_event_website_id_session_id_created_at_idx` ON `website_event`(`website_id`, `session_id`, `created_at`);
++
++-- CreateTable
++CREATE TABLE `event_data` (
++    `event_id` TEXT PRIMARY KEY NOT NULL,
++    `website_event_id` TEXT NOT NULL,
++    `website_id` TEXT NOT NULL,
++    `event_key` TEXT NOT NULL,
++    `event_string_value` TEXT NULL,
++    `event_numeric_value` NUMERIC NULL,
++    `event_date_value` INTEGER NULL,
++    `event_data_type` INTEGER UNSIGNED NOT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now'))
++);
++CREATE INDEX `event_data_created_at_idx` ON `event_data`(`created_at`);
++CREATE INDEX `event_data_website_id_idx` ON `event_data`(`website_id`);
++CREATE INDEX `event_data_website_event_id_idx` ON `event_data`(`website_event_id`);
++CREATE INDEX `event_data_website_id_website_event_id_created_at_idx` ON `event_data`(`website_id`, `website_event_id`, `created_at`);
++
++-- CreateTable
++CREATE TABLE `team` (
++    `team_id` TEXT PRIMARY KEY NOT NULL,
++    `name` TEXT NOT NULL,
++    `access_code` TEXT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now')),
++    `updated_at` INTEGER NULL
++);
++CREATE UNIQUE INDEX `team_team_id_key` ON `team`(`team_id`);
++CREATE UNIQUE INDEX `team_access_code_key` ON `team`(`access_code`);
++CREATE INDEX `team_access_code_idx` ON `team`(`access_code`);
++
++-- CreateTable
++CREATE TABLE `team_user` (
++    `team_user_id` TEXT PRIMARY KEY NOT NULL,
++    `team_id` TEXT NOT NULL,
++    `user_id` TEXT NOT NULL,
++    `role` TEXT NOT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now')),
++    `updated_at` INTEGER NULL
++);
++CREATE UNIQUE INDEX `team_user_team_user_id_key` ON `team_user`(`team_user_id`);
++CREATE INDEX `team_user_team_id_idx` ON `team_user`(`team_id`);
++CREATE INDEX `team_user_user_id_idx` ON `team_user`(`user_id`);
++
++-- CreateTable
++CREATE TABLE `team_website` (
++    `team_website_id` TEXT PRIMARY KEY NOT NULL,
++    `team_id` TEXT NOT NULL,
++    `website_id` TEXT NOT NULL,
++    `created_at` INTEGER NULL DEFAULT (strftime('%s', 'now'))
++);
++CREATE UNIQUE INDEX `team_website_team_website_id_key` ON `team_website`(`team_website_id`);
++CREATE INDEX `team_website_team_id_idx` ON `team_website`(`team_id`);
++CREATE INDEX `team_website_website_id_idx` ON `team_website`(`website_id`);
++
++-- AddSystemUser
++INSERT INTO user (user_id, username, role, password) VALUES ('41e2b680-648e-4b09-bcd7-3e2b10c06264' , 'admin', 'admin', '$2b$10$BUli0c.muyCW1ErNJc3jL.vFRFtFJWrT8/GcR4A.sUdCznaXiqFXa');
+\ No newline at end of file
+diff --git a/db/sqlite/migrations/02_1_unixepoch_availability/migration.sql b/db/sqlite/migrations/02_1_unixepoch_availability/migration.sql
+new file mode 100644
+index 00000000..4123bbde
+--- /dev/null
++++ b/db/sqlite/migrations/02_1_unixepoch_availability/migration.sql
+@@ -0,0 +1,15 @@
++-- Update defaults and force schema_version incrementation with an immediatly dropped new table
++BEGIN TRANSACTION;
++PRAGMA writable_schema=ON;
++UPDATE sqlite_schema SET sql='CREATE TABLE `user` ( `user_id` TEXT PRIMARY KEY NOT NULL, `username` TEXT NOT NULL, `password` TEXT NOT NULL, `role` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL, `deleted_at` INTEGER NULL )' WHERE type='table' AND name='user';
++UPDATE sqlite_schema SET sql='CREATE TABLE `session` ( `session_id` TEXT PRIMARY KEY NOT NULL, `website_id` TEXT NOT NULL, `hostname` TEXT NULL, `browser` TEXT NULL, `os` TEXT NULL, `device` TEXT NULL, `screen` TEXT NULL, `language` TEXT NULL, `country` TEXT NULL, `subdivision1` TEXT NULL, `subdivision2` TEXT NULL, `city` TEXT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()) )' WHERE type='table' AND name='session';
++UPDATE sqlite_schema SET sql='CREATE TABLE `website` ( `website_id` TEXT PRIMARY KEY NOT NULL, `name` TEXT NOT NULL, `domain` TEXT NULL, `share_id` TEXT NULL, `reset_at` INTEGER NULL, `user_id` TEXT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL, `deleted_at` INTEGER NULL )' WHERE type='table' AND name='website';
++UPDATE sqlite_schema SET sql='CREATE TABLE `website_event` ( `event_id` TEXT PRIMARY KEY NOT NULL, `website_id` TEXT NOT NULL, `session_id` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `url_path` TEXT NOT NULL, `url_query` TEXT NULL, `referrer_path` TEXT NULL, `referrer_query` TEXT NULL, `referrer_domain` TEXT NULL, `page_title` TEXT NULL, `event_type` INTEGER UNSIGNED NOT NULL DEFAULT 1, `event_name` TEXT NULL )' WHERE type='table' AND name='website_event';
++UPDATE sqlite_schema SET sql='CREATE TABLE `event_data` ( `event_id` TEXT PRIMARY KEY NOT NULL, `website_event_id` TEXT NOT NULL, `website_id` TEXT NOT NULL, `event_key` TEXT NOT NULL, `event_string_value` TEXT NULL, `event_numeric_value` NUMERIC NULL, `event_date_value` INTEGER NULL, `event_data_type` INTEGER UNSIGNED NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()) )' WHERE type='table' AND name='event_data';
++UPDATE sqlite_schema SET sql='CREATE TABLE `team` ( `team_id` TEXT PRIMARY KEY NOT NULL, `name` TEXT NOT NULL, `access_code` TEXT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL )' WHERE type='table' AND name='team';
++UPDATE sqlite_schema SET sql='CREATE TABLE `team_user` ( `team_user_id` TEXT PRIMARY KEY NOT NULL, `team_id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `role` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL )' WHERE type='table' AND name='team_user';
++UPDATE sqlite_schema SET sql='CREATE TABLE `team_website` ( `team_website_id` TEXT PRIMARY KEY NOT NULL, `team_id` TEXT NOT NULL, `website_id` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()) )' WHERE type='table' AND name='team_website';
++CREATE TABLE update_schema_version ( version INTEGER );
++DROP TABLE update_schema_version;
++PRAGMA writable_schema=OFF;
++COMMIT;
+\ No newline at end of file
+diff --git a/db/sqlite/migrations/02_report_schema_session_data/migration.sql b/db/sqlite/migrations/02_report_schema_session_data/migration.sql
+new file mode 100644
+index 00000000..9ee99753
+--- /dev/null
++++ b/db/sqlite/migrations/02_report_schema_session_data/migration.sql
+@@ -0,0 +1,49 @@
++-- AlterTable
++ALTER TABLE `event_data` RENAME COLUMN `event_data_type` TO `data_type`;
++ALTER TABLE `event_data` RENAME COLUMN `event_date_value` TO `date_value`;
++ALTER TABLE `event_data` RENAME COLUMN `event_id` TO `event_data_id`;
++ALTER TABLE `event_data` RENAME COLUMN `event_numeric_value` TO `number_value`;
++ALTER TABLE `event_data` RENAME COLUMN `event_string_value` TO `string_value`;
++
++-- CreateTable
++CREATE TABLE `session_data` (
++    `session_data_id` TEXT PRIMARY KEY NOT NULL,
++    `website_id` TEXT NOT NULL,
++    `session_id` TEXT NOT NULL,
++    `event_key` TEXT NOT NULL,
++    `string_value` TEXT NULL,
++    `number_value` NUMERIC NULL,
++    `date_value` INTEGER NULL,
++    `data_type` INTEGER UNSIGNED NOT NULL,
++    `created_at` INTEGER NULL DEFAULT (unixepoch())
++);
++CREATE INDEX `session_data_created_at_idx` ON `session_data`(`created_at`);
++CREATE INDEX `session_data_website_id_idx` ON `session_data`(`website_id`);
++CREATE INDEX `session_data_session_id_idx` ON `session_data`(`session_id`);
++
++-- CreateTable
++CREATE TABLE `report` (
++    `report_id` TEXT PRIMARY KEY NOT NULL,
++    `user_id` TEXT NOT NULL,
++    `website_id` TEXT NOT NULL,
++    `type` TEXT NOT NULL,
++    `name` TEXT NOT NULL,
++    `description` TEXT NOT NULL,
++    `parameters` TEXT NOT NULL,
++    `created_at` INTEGER NULL DEFAULT (unixepoch()),
++    `updated_at` INTEGER NULL
++);
++CREATE UNIQUE INDEX `report_report_id_key` ON `report`(`report_id`);
++CREATE INDEX `report_user_id_idx` ON `report`(`user_id`);
++CREATE INDEX `report_website_id_idx` ON `report`(`website_id`);
++CREATE INDEX `report_type_idx` ON `report`(`type`);
++CREATE INDEX `report_name_idx` ON `report`(`name`);
++
++-- EventData migration
++UPDATE event_data
++SET string_value = number_value
++WHERE data_type = 2;
++
++UPDATE event_data
++SET string_value = strftime('%Y-%m-%dT%H:%M:%fZ', date_value, 'unixepoch')
++WHERE data_type = 4;
+\ No newline at end of file
+diff --git a/db/sqlite/migrations/03_metric_performance_index/migration.sql b/db/sqlite/migrations/03_metric_performance_index/migration.sql
+new file mode 100644
+index 00000000..64681364
+--- /dev/null
++++ b/db/sqlite/migrations/03_metric_performance_index/migration.sql
+@@ -0,0 +1,50 @@
++-- CreateIndex
++CREATE INDEX `event_data_website_id_created_at_idx` ON `event_data`(`website_id`, `created_at`);
++
++-- CreateIndex
++CREATE INDEX `event_data_website_id_created_at_event_key_idx` ON `event_data`(`website_id`, `created_at`, `event_key`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_idx` ON `session`(`website_id`, `created_at`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_hostname_idx` ON `session`(`website_id`, `created_at`, `hostname`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_browser_idx` ON `session`(`website_id`, `created_at`, `browser`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_os_idx` ON `session`(`website_id`, `created_at`, `os`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_device_idx` ON `session`(`website_id`, `created_at`, `device`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_screen_idx` ON `session`(`website_id`, `created_at`, `screen`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_language_idx` ON `session`(`website_id`, `created_at`, `language`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_country_idx` ON `session`(`website_id`, `created_at`, `country`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_subdivision1_idx` ON `session`(`website_id`, `created_at`, `subdivision1`);
++
++-- CreateIndex
++CREATE INDEX `session_website_id_created_at_city_idx` ON `session`(`website_id`, `created_at`, `city`);
++
++-- CreateIndex
++CREATE INDEX `website_event_website_id_created_at_url_path_idx` ON `website_event`(`website_id`, `created_at`, `url_path`);
++
++-- CreateIndex
++CREATE INDEX `website_event_website_id_created_at_url_query_idx` ON `website_event`(`website_id`, `created_at`, `url_query`);
++
++-- CreateIndex
++CREATE INDEX `website_event_website_id_created_at_referrer_domain_idx` ON `website_event`(`website_id`, `created_at`, `referrer_domain`);
++
++-- CreateIndex
++CREATE INDEX `website_event_website_id_created_at_page_title_idx` ON `website_event`(`website_id`, `created_at`, `page_title`);
++
++-- CreateIndex
++CREATE INDEX `website_event_website_id_created_at_event_name_idx` ON `website_event`(`website_id`, `created_at`, `event_name`);
+diff --git a/db/sqlite/migrations/04_1_indexes_tables/migration.sql b/db/sqlite/migrations/04_1_indexes_tables/migration.sql
+new file mode 100644
+index 00000000..89418be8
+--- /dev/null
++++ b/db/sqlite/migrations/04_1_indexes_tables/migration.sql
+@@ -0,0 +1,206 @@
++-- Remove redundant indexes and clean table definitions
++BEGIN TRANSACTION;
++-- Create new tables
++CREATE TABLE "new_user" (
++    "user_id" TEXT NOT NULL,
++    "username" TEXT NOT NULL,
++    "password" TEXT NOT NULL,
++    "role" TEXT NOT NULL,
++    "created_at" INTEGER DEFAULT (unixepoch()),
++    "updated_at" INTEGER,
++    "deleted_at" INTEGER
++);
++CREATE TABLE "new_session" (
++    "session_id" TEXT NOT NULL,
++    "website_id" TEXT NOT NULL,
++    "hostname" TEXT,
++    "browser" TEXT,
++    "os" TEXT,
++    "device" TEXT,
++    "screen" TEXT,
++    "language" TEXT,
++    "country" TEXT,
++    "subdivision1" TEXT,
++    "subdivision2" TEXT,
++    "city" TEXT,
++    "created_at" INTEGER DEFAULT (unixepoch())
++);
++CREATE TABLE "new_website" (
++    "website_id" TEXT NOT NULL,
++    "name" TEXT NOT NULL,
++    "domain" TEXT,
++    "share_id" TEXT,
++    "reset_at" INTEGER,
++    "user_id" TEXT,
++    "created_at" INTEGER DEFAULT (unixepoch()),
++    "updated_at" INTEGER,
++    "deleted_at" INTEGER
++);
++CREATE TABLE "new_website_event" (
++    "event_id" TEXT NOT NULL,
++    "website_id" TEXT NOT NULL,
++    "session_id" TEXT NOT NULL,
++    "created_at" INTEGER DEFAULT (unixepoch()),
++    "url_path" TEXT NOT NULL,
++    "url_query" TEXT,
++    "referrer_path" TEXT,
++    "referrer_query" TEXT,
++    "referrer_domain" TEXT,
++    "page_title" TEXT,
++    "event_type" INTEGER NOT NULL DEFAULT 1,
++    "event_name" TEXT
++);
++CREATE TABLE "new_event_data" (
++    "event_data_id" TEXT NOT NULL,
++    "website_event_id" TEXT NOT NULL,
++    "website_id" TEXT NOT NULL,
++    "event_key" TEXT NOT NULL,
++    "string_value" TEXT,
++    "number_value" NUMERIC,
++    "date_value" INTEGER,
++    "data_type" INTEGER NOT NULL,
++    "created_at" INTEGER DEFAULT (unixepoch())
++);
++CREATE TABLE "new_team" (
++    "team_id" TEXT NOT NULL,
++    "name" TEXT NOT NULL,
++    "access_code" TEXT,
++    "created_at" INTEGER DEFAULT (unixepoch()),
++    "updated_at" INTEGER
++);
++CREATE TABLE "new_team_user" (
++    "team_user_id" TEXT NOT NULL,
++    "team_id" TEXT NOT NULL,
++    "user_id" TEXT NOT NULL,
++    "role" TEXT NOT NULL,
++    "created_at" INTEGER DEFAULT (unixepoch()),
++    "updated_at" INTEGER
++);
++CREATE TABLE "new_team_website" (
++    "team_website_id" TEXT NOT NULL,
++    "team_id" TEXT NOT NULL,
++    "website_id" TEXT NOT NULL,
++    "created_at" INTEGER DEFAULT (unixepoch())
++);
++CREATE TABLE "new_session_data" (
++    "session_data_id" TEXT NOT NULL,
++    "website_id" TEXT NOT NULL,
++    "session_id" TEXT NOT NULL,
++    "event_key" TEXT NOT NULL,
++    "string_value" TEXT,
++    "number_value" NUMERIC,
++    "date_value" INTEGER,
++    "data_type" INTEGER NOT NULL,
++    "created_at" INTEGER DEFAULT (unixepoch())
++);
++CREATE TABLE "new_report" (
++    "report_id" TEXT NOT NULL,
++    "user_id" TEXT NOT NULL,
++    "website_id" TEXT NOT NULL,
++    "type" TEXT NOT NULL,
++    "name" TEXT NOT NULL,
++    "description" TEXT NOT NULL,
++    "parameters" TEXT NOT NULL,
++    "created_at" INTEGER DEFAULT (unixepoch()),
++    "updated_at" INTEGER
++);
++-- Transfer data
++INSERT INTO "new_user" SELECT "user_id", "username", "password", "role", "created_at", "updated_at", "deleted_at" FROM "user";
++INSERT INTO "new_session" SELECT "session_id", "website_id", "hostname", "browser", "os", "device", "screen", "language", "country", "subdivision1", "subdivision2", "city", "created_at" FROM "session";
++INSERT INTO "new_website" SELECT "website_id", "name", "domain", "share_id", "reset_at", "user_id", "created_at", "updated_at", "deleted_at" FROM "website";
++INSERT INTO "new_website_event" SELECT "event_id", "website_id", "session_id", "created_at", "url_path", "url_query", "referrer_path", "referrer_query", "referrer_domain", "page_title", "event_type", "event_name" FROM "website_event";
++INSERT INTO "new_event_data" SELECT "event_data_id", "website_event_id", "website_id", "event_key", "string_value", "number_value", "date_value", "data_type", "created_at" FROM "event_data";
++INSERT INTO "new_team" SELECT "team_id", "name", "access_code", "created_at", "updated_at" FROM "team";
++INSERT INTO "new_team_user" SELECT "team_user_id", "team_id", "user_id", "role", "created_at", "updated_at" FROM "team_user";
++INSERT INTO "new_team_website" SELECT "team_website_id", "team_id", "website_id", "created_at" FROM "team_website";
++INSERT INTO "new_session_data" SELECT "session_data_id", "website_id", "session_id", "event_key", "string_value", "number_value", "date_value", "data_type", "created_at" FROM "session_data";
++INSERT INTO "new_report" SELECT "report_id", "user_id", "website_id", "type", "name", "description", "parameters", "created_at", "updated_at" FROM "report";
++-- Drop tables
++DROP TABLE "user";
++DROP TABLE "session";
++DROP TABLE "website";
++DROP TABLE "website_event";
++DROP TABLE "event_data";
++DROP TABLE "team";
++DROP TABLE "team_user";
++DROP TABLE "team_website";
++DROP TABLE "session_data";
++DROP TABLE "report";
++-- Rename tables
++ALTER TABLE "new_user" RENAME TO "user";
++ALTER TABLE "new_session" RENAME TO "session";
++ALTER TABLE "new_website" RENAME TO "website";
++ALTER TABLE "new_website_event" RENAME TO "website_event";
++ALTER TABLE "new_event_data" RENAME TO "event_data";
++ALTER TABLE "new_team" RENAME TO "team";
++ALTER TABLE "new_team_user" RENAME TO "team_user";
++ALTER TABLE "new_team_website" RENAME TO "team_website";
++ALTER TABLE "new_session_data" RENAME TO "session_data";
++ALTER TABLE "new_report" RENAME TO "report";
++-- Create indexes
++CREATE UNIQUE INDEX "user_user_id_key" ON "user"("user_id");
++CREATE UNIQUE INDEX "user_username_key" ON "user"("username");
++
++CREATE UNIQUE INDEX "session_session_id_key" ON "session"("session_id");
++CREATE INDEX "session_created_at_idx" ON "session"("created_at");
++CREATE INDEX "session_website_id_idx" ON "session"("website_id");
++CREATE INDEX "session_website_id_created_at_idx" ON "session"("website_id", "created_at");
++CREATE INDEX "session_website_id_created_at_hostname_idx" ON "session"("website_id", "created_at", "hostname");
++CREATE INDEX "session_website_id_created_at_browser_idx" ON "session"("website_id", "created_at", "browser");
++CREATE INDEX "session_website_id_created_at_os_idx" ON "session"("website_id", "created_at", "os");
++CREATE INDEX "session_website_id_created_at_device_idx" ON "session"("website_id", "created_at", "device");
++CREATE INDEX "session_website_id_created_at_screen_idx" ON "session"("website_id", "created_at", "screen");
++CREATE INDEX "session_website_id_created_at_language_idx" ON "session"("website_id", "created_at", "language");
++CREATE INDEX "session_website_id_created_at_country_idx" ON "session"("website_id", "created_at", "country");
++CREATE INDEX "session_website_id_created_at_subdivision1_idx" ON "session"("website_id", "created_at", "subdivision1");
++CREATE INDEX "session_website_id_created_at_city_idx" ON "session"("website_id", "created_at", "city");
++
++CREATE UNIQUE INDEX "website_website_id_key" ON "website"("website_id");
++CREATE UNIQUE INDEX "website_share_id_key" ON "website"("share_id");
++CREATE INDEX "website_user_id_idx" ON "website"("user_id");
++CREATE INDEX "website_created_at_idx" ON "website"("created_at");
++
++CREATE UNIQUE INDEX "website_event_event_id_key" ON "website_event"("event_id");
++CREATE INDEX "website_event_created_at_idx" ON "website_event"("created_at");
++CREATE INDEX "website_event_session_id_idx" ON "website_event"("session_id");
++CREATE INDEX "website_event_website_id_idx" ON "website_event"("website_id");
++CREATE INDEX "website_event_website_id_created_at_idx" ON "website_event"("website_id", "created_at");
++CREATE INDEX "website_event_website_id_session_id_created_at_idx" ON "website_event"("website_id", "session_id", "created_at");
++CREATE INDEX "website_event_website_id_created_at_url_path_idx" ON "website_event"("website_id", "created_at", "url_path");
++CREATE INDEX "website_event_website_id_created_at_url_query_idx" ON "website_event"("website_id", "created_at", "url_query");
++CREATE INDEX "website_event_website_id_created_at_referrer_domain_idx" ON "website_event"("website_id", "created_at", "referrer_domain");
++CREATE INDEX "website_event_website_id_created_at_page_title_idx" ON "website_event"("website_id", "created_at", "page_title");
++CREATE INDEX "website_event_website_id_created_at_event_name_idx" ON "website_event"("website_id", "created_at", "event_name");
++
++CREATE UNIQUE INDEX "event_data_event_data_id_key" ON "event_data"("event_data_id");
++CREATE INDEX "event_data_created_at_idx" ON "event_data"("created_at");
++CREATE INDEX "event_data_website_id_idx" ON "event_data"("website_id");
++CREATE INDEX "event_data_website_event_id_idx" ON "event_data"("website_event_id");
++CREATE INDEX "event_data_website_id_website_event_id_created_at_idx" ON "event_data"("website_id", "website_event_id", "created_at");
++CREATE INDEX "event_data_website_id_created_at_idx" ON "event_data"("website_id", "created_at");
++CREATE INDEX "event_data_website_id_created_at_event_key_idx" ON "event_data"("website_id", "created_at", "event_key");
++
++CREATE UNIQUE INDEX "team_team_id_key" ON "team"("team_id");
++CREATE UNIQUE INDEX "team_access_code_key" ON "team"("access_code");
++
++CREATE UNIQUE INDEX "team_user_team_user_id_key" ON "team_user"("team_user_id");
++CREATE INDEX "team_user_team_id_idx" ON "team_user"("team_id");
++CREATE INDEX "team_user_user_id_idx" ON "team_user"("user_id");
++
++CREATE UNIQUE INDEX "team_website_team_website_id_key" ON "team_website"("team_website_id");
++CREATE INDEX "team_website_team_id_idx" ON "team_website"("team_id");
++CREATE INDEX "team_website_website_id_idx" ON "team_website"("website_id");
++
++CREATE UNIQUE INDEX "session_data_session_data_id_key" ON "session_data"("session_data_id");
++CREATE INDEX "session_data_created_at_idx" ON "session_data"("created_at");
++CREATE INDEX "session_data_website_id_idx" ON "session_data"("website_id");
++CREATE INDEX "session_data_session_id_idx" ON "session_data"("session_id");
++
++CREATE UNIQUE INDEX "report_report_id_key" ON "report"("report_id");
++CREATE INDEX "report_user_id_idx" ON "report"("user_id");
++CREATE INDEX "report_website_id_idx" ON "report"("website_id");
++CREATE INDEX "report_type_idx" ON "report"("type");
++CREATE INDEX "report_name_idx" ON "report"("name");
++COMMIT;
++
++VACUUM;
+\ No newline at end of file
+diff --git a/db/sqlite/migrations/04_team_redesign/migration.sql b/db/sqlite/migrations/04_team_redesign/migration.sql
+new file mode 100644
+index 00000000..e2a6ed84
+--- /dev/null
++++ b/db/sqlite/migrations/04_team_redesign/migration.sql
+@@ -0,0 +1,31 @@
++/*
++  Warnings:
++
++  - You are about to drop the `team_website` table. If the table is not empty, all the data it contains will be lost.
++
++*/
++BEGIN TRANSACTION;
++-- AlterTable
++ALTER TABLE "team" ADD COLUMN "deleted_at" INTEGER;
++ALTER TABLE "team" ADD COLUMN "logo_url" TEXT;
++
++-- AlterTable
++ALTER TABLE "user" ADD COLUMN "display_name" TEXT;
++ALTER TABLE "user" ADD COLUMN "logo_url" TEXT;
++
++-- AlterTable
++ALTER TABLE "website" ADD COLUMN "created_by" TEXT;
++ALTER TABLE "website" ADD COLUMN "team_id" TEXT;
++COMMIT;
++
++-- MigrateData
++UPDATE "website" SET created_by = user_id WHERE team_id IS NULL;
++
++-- DropTable
++DROP TABLE "team_website";
++
++-- CreateIndex
++CREATE INDEX "website_team_id_idx" ON "website"("team_id");
++
++-- CreateIndex
++CREATE INDEX "website_created_by_idx" ON "website"("created_by");
+\ No newline at end of file
+diff --git a/db/sqlite/migrations/migration_lock.toml b/db/sqlite/migrations/migration_lock.toml
+new file mode 100644
+index 00000000..e5e5c470
+--- /dev/null
++++ b/db/sqlite/migrations/migration_lock.toml
+@@ -0,0 +1,3 @@
++# Please do not edit this file manually
++# It should be added in your version-control system (i.e. Git)
++provider = "sqlite"
+\ No newline at end of file
+diff --git a/db/sqlite/schema.prisma b/db/sqlite/schema.prisma
+new file mode 100644
+index 00000000..02d01ba1
+--- /dev/null
++++ b/db/sqlite/schema.prisma
+@@ -0,0 +1,213 @@
++generator client {
++  provider = "prisma-client-js"
++}
++
++datasource db {
++  provider     = "sqlite"
++  url          = env("DATABASE_URL")
++  relationMode = "prisma"
++}
++
++model User {
++  id          String  @unique @map("user_id")
++  username    String  @unique
++  password    String
++  role        String  @map("role")
++  logoUrl     String? @map("logo_url")
++  displayName String? @map("display_name")
++  createdAt   Int?    @default(dbgenerated("unixepoch()")) @map("created_at")
++  updatedAt   Int?    @map("updated_at")
++  deletedAt   Int?    @map("deleted_at")
++
++  websiteUser       Website[]  @relation("user")
++  websiteCreateUser Website[]  @relation("createUser")
++  teamUser          TeamUser[]
++  report            Report[]
++
++  @@map("user")
++}
++
++model Session {
++  id           String  @unique @map("session_id")
++  websiteId    String  @map("website_id")
++  hostname     String?
++  browser      String?
++  os           String?
++  device       String?
++  screen       String?
++  language     String?
++  country      String?
++  subdivision1 String?
++  subdivision2 String?
++  city         String?
++  createdAt    Int?    @default(dbgenerated("unixepoch()")) @map("created_at")
++
++  websiteEvent WebsiteEvent[]
++  sessionData  SessionData[]
++
++  @@index([createdAt])
++  @@index([websiteId])
++  @@index([websiteId, createdAt])
++  @@index([websiteId, createdAt, hostname])
++  @@index([websiteId, createdAt, browser])
++  @@index([websiteId, createdAt, os])
++  @@index([websiteId, createdAt, device])
++  @@index([websiteId, createdAt, screen])
++  @@index([websiteId, createdAt, language])
++  @@index([websiteId, createdAt, country])
++  @@index([websiteId, createdAt, subdivision1])
++  @@index([websiteId, createdAt, city])
++  @@map("session")
++}
++
++model Website {
++  id        String  @unique @map("website_id")
++  name      String
++  domain    String?
++  shareId   String? @unique @map("share_id")
++  resetAt   Int?    @map("reset_at")
++  userId    String? @map("user_id")
++  teamId    String? @map("team_id")
++  createdBy String? @map("created_by")
++  createdAt Int?    @default(dbgenerated("unixepoch()")) @map("created_at")
++  updatedAt Int?    @map("updated_at")
++  deletedAt Int?    @map("deleted_at")
++
++  user        User?         @relation("user", fields: [userId], references: [id])
++  createUser  User?         @relation("createUser", fields: [createdBy], references: [id])
++  team        Team?         @relation(fields: [teamId], references: [id])
++  eventData   EventData[]
++  report      Report[]
++  sessionData SessionData[]
++
++  @@index([userId])
++  @@index([teamId])
++  @@index([createdAt])
++  @@index([createdBy])
++  @@map("website")
++}
++
++model WebsiteEvent {
++  id             String  @unique @map("event_id")
++  websiteId      String  @map("website_id")
++  sessionId      String  @map("session_id")
++  createdAt      Int?    @default(dbgenerated("unixepoch()")) @map("created_at")
++  urlPath        String  @map("url_path")
++  urlQuery       String? @map("url_query")
++  referrerPath   String? @map("referrer_path")
++  referrerQuery  String? @map("referrer_query")
++  referrerDomain String? @map("referrer_domain")
++  pageTitle      String? @map("page_title")
++  eventType      Int     @default(1) @map("event_type")
++  eventName      String? @map("event_name")
++
++  eventData EventData[]
++  session   Session     @relation(fields: [sessionId], references: [id])
++
++  @@index([createdAt])
++  @@index([sessionId])
++  @@index([websiteId])
++  @@index([websiteId, createdAt])
++  @@index([websiteId, createdAt, urlPath])
++  @@index([websiteId, createdAt, urlQuery])
++  @@index([websiteId, createdAt, referrerDomain])
++  @@index([websiteId, createdAt, pageTitle])
++  @@index([websiteId, createdAt, eventName])
++  @@index([websiteId, sessionId, createdAt])
++  @@map("website_event")
++}
++
++model EventData {
++  id             String   @unique @map("event_data_id")
++  websiteId      String   @map("website_id")
++  websiteEventId String   @map("website_event_id")
++  eventKey       String   @map("event_key")
++  stringValue    String?  @map("string_value")
++  numberValue    Decimal? @map("number_value")
++  dateValue      Int?     @map("date_value")
++  dataType       Int      @map("data_type")
++  createdAt      Int?     @default(dbgenerated("unixepoch()")) @map("created_at")
++
++  website      Website      @relation(fields: [websiteId], references: [id])
++  websiteEvent WebsiteEvent @relation(fields: [websiteEventId], references: [id])
++
++  @@index([createdAt])
++  @@index([websiteId])
++  @@index([websiteEventId])
++  @@index([websiteId, websiteEventId, createdAt])
++  @@index([websiteId, createdAt])
++  @@index([websiteId, createdAt, eventKey])
++  @@map("event_data")
++}
++
++model SessionData {
++  id          String   @unique @map("session_data_id")
++  websiteId   String   @map("website_id")
++  sessionId   String   @map("session_id")
++  eventKey    String   @map("event_key")
++  stringValue String?  @map("string_value")
++  numberValue Decimal? @map("number_value")
++  dateValue   Int?     @map("date_value")
++  dataType    Int      @map("data_type")
++  createdAt   Int?     @default(dbgenerated("unixepoch()")) @map("created_at")
++
++  website Website @relation(fields: [websiteId], references: [id])
++  session Session @relation(fields: [sessionId], references: [id])
++
++  @@index([createdAt])
++  @@index([websiteId])
++  @@index([sessionId])
++  @@map("session_data")
++}
++
++model Team {
++  id         String  @unique @map("team_id")
++  name       String
++  accessCode String? @unique @map("access_code")
++  logoUrl    String? @map("logo_url")
++  createdAt  Int?    @default(dbgenerated("unixepoch()")) @map("created_at")
++  updatedAt  Int?    @map("updated_at")
++  deletedAt  Int?    @map("deleted_at")
++
++  website  Website[]
++  teamUser TeamUser[]
++
++  @@map("team")
++}
++
++model TeamUser {
++  id        String @unique @map("team_user_id")
++  teamId    String @map("team_id")
++  userId    String @map("user_id")
++  role      String @map("role")
++  createdAt Int?   @default(dbgenerated("unixepoch()")) @map("created_at")
++  updatedAt Int?   @map("updated_at")
++
++  team Team @relation(fields: [teamId], references: [id])
++  user User @relation(fields: [userId], references: [id])
++
++  @@index([teamId])
++  @@index([userId])
++  @@map("team_user")
++}
++
++model Report {
++  id          String @unique @map("report_id")
++  userId      String @map("user_id")
++  websiteId   String @map("website_id")
++  type        String @map("type")
++  name        String @map("name")
++  description String @map("description")
++  parameters  String @map("parameters")
++  createdAt   Int?   @default(dbgenerated("unixepoch()")) @map("created_at")
++  updatedAt   Int?   @map("updated_at")
++
++  user    User    @relation(fields: [userId], references: [id])
++  website Website @relation(fields: [websiteId], references: [id])
++
++  @@index([userId])
++  @@index([websiteId])
++  @@index([type])
++  @@index([name])
++  @@map("report")
++}
+diff --git a/scripts/check-db.js b/scripts/check-db.js
+index 757843ac..4bbb71a9 100644
+--- a/scripts/check-db.js
++++ b/scripts/check-db.js
+@@ -17,10 +17,15 @@ function getDatabaseType(url = process.env.DATABASE_URL) {
+     return 'postgresql';
+   }
+ 
++  if (type === 'file') {
++    return 'sqlite';
++  }
++
+   return type;
+ }
+ 
+ const prisma = new PrismaClient();
++const databaseType = getDatabaseType();
+ 
+ function success(msg) {
+   console.log(chalk.greenBright(`✓ ${msg}`));
+@@ -49,30 +54,32 @@ async function checkConnection() {
+ }
+ 
+ async function checkDatabaseVersion() {
+-  const query = await prisma.$queryRaw`select version() as version`;
+-  const version = semver.valid(semver.coerce(query[0].version));
++  if (databaseType !== 'sqlite') {
++    const query = await prisma.$queryRaw`select version() as version`;
++    const version = semver.valid(semver.coerce(query[0].version));
+ 
+-  const databaseType = getDatabaseType();
+-  const minVersion = databaseType === 'postgresql' ? '9.4.0' : '5.7.0';
++    const minVersion = databaseType === 'postgresql' ? '9.4.0' : '5.7.0';
+ 
+-  if (semver.lt(version, minVersion)) {
+-    throw new Error(
+-      `Database version is not compatible. Please upgrade ${databaseType} version to ${minVersion} or greater`,
+-    );
+-  }
++    if (semver.lt(version, minVersion)) {
++      throw new Error(
++        `Database version is not compatible. Please upgrade ${databaseType} version to ${minVersion} or greater`,
++      );
++    }
+ 
+-  success('Database version check successful.');
++    success('Database version check successful.');
++  }
+ }
+ 
+ async function checkV1Tables() {
++  // check for v1 migrations before v2 release date
++  const releaseDate = (databaseType !== 'sqlite') ? "'2023-04-17'" : 1686268800000;
+   try {
+-    // check for v1 migrations before v2 release date
+     const record =
+-      await prisma.$queryRaw`select * from _prisma_migrations where started_at < '2023-04-17'`;
++      await prisma.$queryRaw`select * from _prisma_migrations where started_at < ${releaseDate}`;
+ 
+     if (record.length > 0) {
+       error(
+-        'Umami v1 tables detected. For how to upgrade from v1 to v2 go to https://umami.is/docs/migrate-v1-v2.',
++        'Umami v1 tables detected.',
+       );
+       process.exit(1);
+     }
+diff --git a/scripts/copy-db-files.js b/scripts/copy-db-files.js
+index 15c34674..673db6b6 100644
+--- a/scripts/copy-db-files.js
++++ b/scripts/copy-db-files.js
+@@ -11,12 +11,16 @@ function getDatabaseType(url = process.env.DATABASE_URL) {
+     return 'postgresql';
+   }
+ 
++  if (type === 'file') {
++    return 'sqlite';
++  }
++
+   return type;
+ }
+ 
+ const databaseType = getDatabaseType();
+ 
+-if (!databaseType || !['mysql', 'postgresql'].includes(databaseType)) {
++if (!databaseType || !['mysql', 'postgresql', 'sqlite'].includes(databaseType)) {
+   throw new Error('Missing or invalid database');
+ }
+ 
+diff --git a/scripts/sqlite-vacuum.js b/scripts/sqlite-vacuum.js
+new file mode 100644
+index 00000000..a5e49ed3
+--- /dev/null
++++ b/scripts/sqlite-vacuum.js
+@@ -0,0 +1,10 @@
++require('dotenv').config();
++const { PrismaClient } = require('@prisma/client');
++
++const prisma = new PrismaClient();
++
++(async () => {
++  await prisma.$connect();
++  await prisma.$executeRaw`VACUUM`;
++  prisma.$disconnect();
++})();
+\ No newline at end of file
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 0ffedd0d..6da74a9b 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -1,6 +1,7 @@
+ export const PRISMA = 'prisma';
+ export const POSTGRESQL = 'postgresql';
+ export const MYSQL = 'mysql';
++export const SQLITE = 'sqlite';
+ export const CLICKHOUSE = 'clickhouse';
+ export const KAFKA = 'kafka';
+ export const KAFKA_PRODUCER = 'kafka-producer';
+@@ -17,6 +18,10 @@ export function getDatabaseType(url = process.env.DATABASE_URL) {
+     return POSTGRESQL;
+   }
+ 
++  if (type === 'file') {
++    return SQLITE;
++  }
++
+   return type;
+ }
+ 
+@@ -31,7 +36,7 @@ export async function runQuery(queries: any) {
+ 
+   const db = getDatabaseType();
+ 
+-  if (db === POSTGRESQL || db === MYSQL) {
++  if (db === POSTGRESQL || db === MYSQL || db === SQLITE) {
+     return queries[PRISMA]();
+   }
+ }
+diff --git a/src/lib/prisma-client.ts b/src/lib/prisma-client.ts
+new file mode 100644
+index 00000000..3f58cb97
+--- /dev/null
++++ b/src/lib/prisma-client.ts
+@@ -0,0 +1,131 @@
++import { PrismaClient } from '@prisma/client';
++import { PrismaClientOptions, RawValue } from '@prisma/client/runtime/library';
++import { PRISMA, SQLITE, getDatabaseType } from 'lib/db';
++import debug from 'debug';
++
++const log = debug('umami:prisma-client');
++
++const PRISMA_LOG_OPTIONS = {
++  log: [
++    {
++      emit: 'event',
++      level: 'query',
++    },
++  ],
++};
++
++export function getClient(params?: {
++  logQuery?: boolean;
++  queryLogger?: () => void;
++  options?: PrismaClientOptions;
++}): PrismaClient {
++  const {
++    logQuery = !!process.env.LOG_QUERY,
++    queryLogger,
++    options,
++  } = params || {};
++
++  let client = new PrismaClient({
++    errorFormat: 'pretty',
++    ...(logQuery && PRISMA_LOG_OPTIONS),
++    ...options,
++  });
++
++  if (logQuery) {
++    client.$on('query', queryLogger || log);
++  }
++
++  if (getDatabaseType() === SQLITE) {
++    /*
++    * Date
++    */
++    const dbDate = arg => Math.floor(arg.getTime() / 1000);
++
++    const handleUpdate = ({ args, query }) => {
++      args.data.updatedAt = dbDate(new Date());
++      return query(args);
++    };
++
++    let queries = {};
++
++    ['user', 'website', 'team', 'teamUser', 'report'].forEach(key => {
++      queries[key] = {
++        update: handleUpdate,
++      };
++    });
++
++    queries['$queryRawUnsafe'] = ({ args, query }) => {
++      for(let i = args.length ; i > 1; i--){
++        if (args[i] instanceof Date) {
++          args[i] = dbDate(args[i]);
++        }
++      }
++      return query(args);
++    };
++
++    client = client.$extends({
++      client: {
++        $dbDate: dbDate,
++        $rawDateQuery: arg => `${arg} * 1000`,
++      },
++      query: {
++        ...queries,
++      },
++      result: {
++        $allModels: {
++          createdAt: {
++            needs: { createdAt: true },
++            compute(model) {
++              return model.createdAt * 1000;
++            },
++          },
++          updatedAt: {
++            needs: { updatedAt: true },
++            compute(model) {
++              return (model.updatedAt) ? model.updatedAt * 1000 : null;
++            },
++          },
++        },
++      },
++    });
++
++    /*
++    * CreateMany
++    */
++    const handleCreateMany = (model, { data: dataArray }) => {
++      return Promise.all(
++        dataArray.map(async (data) => {
++          await client[model].create({
++            data,
++          });
++        })
++      );
++    };
++    ['eventData', 'sessionData'].forEach(key => {
++      client[key].createMany = handleCreateMany.bind(null, key);
++    });
++  } else {
++    client.$dbDate = arg => arg;
++    client.$rawDateQuery = arg => arg;
++  }
++
++  if (process.env.NODE_ENV !== 'production') {
++    global[PRISMA] = client;
++  }
++
++  log('Prisma initialized');
++
++  return client;
++}
++
++const client = global[PRISMA] || getClient();
++
++async function rawQuery(query: string, params: RawValue[] = []) {
++  return client.$queryRawUnsafe.apply(client, [query, ...params]);
++}
++
++async function transaction(input: any, options?: any) {
++  return client.$transaction(input, options);
++}
++
++export default { client, log, rawQuery, transaction };
+diff --git a/src/lib/prisma.ts b/src/lib/prisma.ts
+index 4230cea6..03798fdc 100644
+--- a/src/lib/prisma.ts
++++ b/src/lib/prisma.ts
+@@ -1,7 +1,7 @@
+ import { Prisma } from '@prisma/client';
+-import prisma from '@umami/prisma-client';
++import prisma from 'lib/prisma-client';
+ import moment from 'moment-timezone';
+-import { MYSQL, POSTGRESQL, getDatabaseType } from 'lib/db';
++import { MYSQL, POSTGRESQL, SQLITE, getDatabaseType } from 'lib/db';
+ import { FILTER_COLUMNS, SESSION_COLUMNS, OPERATORS, DEFAULT_PAGE_SIZE } from './constants';
+ import { loadWebsite } from './load';
+ import { maxDate } from './date';
+@@ -23,6 +23,14 @@ const POSTGRESQL_DATE_FORMATS = {
+   year: 'YYYY-01-01',
+ };
+ 
++const SQLITE_DATE_FORMATS = {
++  minute: '%Y-%m-%d %H:%M:00',
++  hour: '%Y-%m-%d %H:00:00',
++  day: '%Y-%m-%d',
++  month: '%Y-%m-01',
++  year: '%Y-01-01',
++};
++
+ function getAddIntervalQuery(field: string, interval: string): string {
+   const db = getDatabaseType();
+ 
+@@ -33,6 +41,10 @@ function getAddIntervalQuery(field: string, interval: string): string {
+   if (db === MYSQL) {
+     return `DATE_ADD(${field}, interval ${interval})`;
+   }
++
++  if (db === SQLITE) {
++    return `strftime('%s', ${field}, 'unixepoch', '${interval}')`;
++  }
+ }
+ 
+ function getDayDiffQuery(field1: string, field2: string): string {
+@@ -45,6 +57,10 @@ function getDayDiffQuery(field1: string, field2: string): string {
+   if (db === MYSQL) {
+     return `DATEDIFF(${field1}, ${field2})`;
+   }
++
++  if (db === SQLITE) {
++    return `((${field2} - ${field1}) / 86400)`;
++  }
+ }
+ 
+ function getCastColumnQuery(field: string, type: string): string {
+@@ -54,7 +70,7 @@ function getCastColumnQuery(field: string, type: string): string {
+     return `${field}::${type}`;
+   }
+ 
+-  if (db === MYSQL) {
++  if (db === MYSQL || db === SQLITE) {
+     return `${field}`;
+   }
+ }
+@@ -78,6 +94,14 @@ function getDateQuery(field: string, unit: string, timezone?: string): string {
+ 
+     return `date_format(${field}, '${MYSQL_DATE_FORMATS[unit]}')`;
+   }
++
++  if (db === SQLITE) {
++    if(timezone) {
++      const tz = moment.tz(timezone).format('Z').substring(0,3);
++      return `strftime('${SQLITE_DATE_FORMATS[unit]}', ${field}, 'unixepoch', '${tz} hours')`;
++    }
++    return `strftime('${SQLITE_DATE_FORMATS[unit]}', ${field}, 'unixepoch')`;
++  }
+ }
+ 
+ function getTimestampDiffQuery(field1: string, field2: string): string {
+@@ -90,6 +114,10 @@ function getTimestampDiffQuery(field1: string, field2: string): string {
+   if (db === MYSQL) {
+     return `timestampdiff(second, ${field1}, ${field2})`;
+   }
++
++  if (db === SQLITE) {
++    return `${field2} - ${field1}`;
++  }
+ }
+ 
+ function mapFilter(column: string, filter: string, name: string, type = 'varchar') {
+@@ -163,7 +191,7 @@ async function rawQuery(sql: string, data: object): Promise<any> {
+   const db = getDatabaseType();
+   const params = [];
+ 
+-  if (db !== POSTGRESQL && db !== MYSQL) {
++  if (db !== POSTGRESQL && db !== MYSQL && db !== SQLITE) {
+     return Promise.reject(new Error('Unknown database.'));
+   }
+ 
+@@ -171,7 +199,7 @@ async function rawQuery(sql: string, data: object): Promise<any> {
+     const [, name, type] = args;
+     params.push(data[name]);
+ 
+-    return db === MYSQL ? '?' : `$${params.length}${type ?? ''}`;
++    return db !== POSTGRESQL ? '?' : `$${params.length}${type ?? ''}`;
+   });
+ 
+   return prisma.rawQuery(query, params);
+diff --git a/src/queries/admin/team.ts b/src/queries/admin/team.ts
+index 74b877de..1bc043b4 100644
+--- a/src/queries/admin/team.ts
++++ b/src/queries/admin/team.ts
+@@ -106,10 +106,7 @@ export async function updateTeam(teamId: string, data: Prisma.TeamUpdateInput):
+     where: {
+       id: teamId,
+     },
+-    data: {
+-      ...data,
+-      updatedAt: new Date(),
+-    },
++    data,
+   });
+ }
+ 
+@@ -123,7 +120,7 @@ export async function deleteTeam(
+     return transaction([
+       client.team.update({
+         data: {
+-          deletedAt: new Date(),
++          deletedAt: client.$dbDate(new Date()),
+         },
+         where: {
+           id: teamId,
+diff --git a/src/queries/admin/user.ts b/src/queries/admin/user.ts
+index 274bb43d..1dfec3c4 100644
+--- a/src/queries/admin/user.ts
++++ b/src/queries/admin/user.ts
+@@ -152,14 +152,14 @@ export async function deleteUser(
+     return transaction([
+       client.website.updateMany({
+         data: {
+-          deletedAt: new Date(),
++          deletedAt: client.$dbDate(new Date()),
+         },
+         where: { id: { in: websiteIds } },
+       }),
+       client.user.update({
+         data: {
+           username: getRandomChars(32),
+-          deletedAt: new Date(),
++          deletedAt: client.$dbDate(new Date()),
+         },
+         where: {
+           id: userId,
+diff --git a/src/queries/admin/website.ts b/src/queries/admin/website.ts
+index cef7f15d..fd395d7f 100644
+--- a/src/queries/admin/website.ts
++++ b/src/queries/admin/website.ts
+@@ -145,7 +145,7 @@ export async function resetWebsite(
+     client.website.update({
+       where: { id: websiteId },
+       data: {
+-        resetAt: new Date(),
++        resetAt: client.$dbDate(new Date()),
+       },
+     }),
+   ]).then(async data => {
+@@ -181,7 +181,7 @@ export async function deleteWebsite(
+     cloudMode
+       ? client.website.update({
+           data: {
+-            deletedAt: new Date(),
++            deletedAt: client.$dbDate(new Date()),
+           },
+           where: { id: websiteId },
+         })
+diff --git a/src/queries/analytics/eventData/saveEventData.ts b/src/queries/analytics/eventData/saveEventData.ts
+index 345409ce..7cda57c1 100644
+--- a/src/queries/analytics/eventData/saveEventData.ts
++++ b/src/queries/analytics/eventData/saveEventData.ts
+@@ -39,7 +39,7 @@ async function relationalQuery(data: {
+     eventKey: a.key,
+     stringValue: getStringValue(a.value, a.dataType),
+     numberValue: a.dataType === DATA_TYPE.number ? a.value : null,
+-    dateValue: a.dataType === DATA_TYPE.date ? new Date(a.value) : null,
++    dateValue: a.dataType === DATA_TYPE.date ? prisma.client.$dbDate(new Date(a.value)) : null,
+     dataType: a.dataType,
+   }));
+ 
+diff --git a/src/queries/analytics/events/getEvents.ts b/src/queries/analytics/events/getEvents.ts
+index 9ef27973..b220c139 100644
+--- a/src/queries/analytics/events/getEvents.ts
++++ b/src/queries/analytics/events/getEvents.ts
+@@ -15,7 +15,7 @@ function relationalQuery(websiteId: string, startDate: Date, eventType: number)
+       websiteId,
+       eventType,
+       createdAt: {
+-        gte: startDate,
++        gte: prisma.client.$dbDate(startDate),
+       },
+     },
+     orderBy: {
+diff --git a/src/queries/analytics/getWebsiteDateRange.ts b/src/queries/analytics/getWebsiteDateRange.ts
+index a4daaafc..72eec9ec 100644
+--- a/src/queries/analytics/getWebsiteDateRange.ts
++++ b/src/queries/analytics/getWebsiteDateRange.ts
+@@ -11,14 +11,14 @@ export async function getWebsiteDateRange(...args: [websiteId: string]) {
+ }
+ 
+ async function relationalQuery(websiteId: string) {
+-  const { rawQuery, parseFilters } = prisma;
++  const { rawQuery, parseFilters, client } = prisma;
+   const { params } = await parseFilters(websiteId, { startDate: new Date(DEFAULT_RESET_DATE) });
+ 
+   const result = await rawQuery(
+     `
+     select
+-      min(created_at) as mindate,
+-      max(created_at) as maxdate
++      ${client.$rawDateQuery('min(created_at)')} as mindate,
++      ${client.$rawDateQuery('max(created_at)')} as maxdate
+     from website_event
+     where website_id = {{websiteId::uuid}}
+       and created_at >= {{startDate}}
+diff --git a/src/queries/analytics/sessions/getSessions.ts b/src/queries/analytics/sessions/getSessions.ts
+index b92e3af9..64ce9559 100644
+--- a/src/queries/analytics/sessions/getSessions.ts
++++ b/src/queries/analytics/sessions/getSessions.ts
+@@ -14,7 +14,7 @@ async function relationalQuery(websiteId: string, startDate: Date) {
+     where: {
+       websiteId,
+       createdAt: {
+-        gte: startDate,
++        gte: prisma.client.$dbDate(startDate),
+       },
+     },
+     orderBy: {
+diff --git a/src/queries/analytics/sessions/saveSessionData.ts b/src/queries/analytics/sessions/saveSessionData.ts
+index b1c5759b..58120d4e 100644
+--- a/src/queries/analytics/sessions/saveSessionData.ts
++++ b/src/queries/analytics/sessions/saveSessionData.ts
+@@ -21,7 +21,7 @@ export async function saveSessionData(data: {
+     key: a.key,
+     stringValue: getStringValue(a.value, a.dataType),
+     numberValue: a.dataType === DATA_TYPE.number ? a.value : null,
+-    dateValue: a.dataType === DATA_TYPE.date ? new Date(a.value) : null,
++    dateValue: a.dataType === DATA_TYPE.date ? client.$dbDate(new Date(a.value)) : null,
+     dataType: a.dataType,
+   }));
+ 
+-- 
