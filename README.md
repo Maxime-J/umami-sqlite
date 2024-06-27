@@ -42,8 +42,6 @@ This patch uses an `Int` field for time data, storing it as Unix timestamp in se
 
 updatedAt timestamps are handled manually for them to have the appropriate format.
 
-Prisma client `createMany` query isn't supported with SQLite, an equivalent function is added.
-
 All of this is mainly handled in `lib/prisma-client.ts`, brought back from @umami/prisma-client, using Prisma Client extensions feature.
 
 `sqlite-vacuum.js` is added in Umami scripts folder to execute VACUUM command on the database. You might want to launch it sometimes:
