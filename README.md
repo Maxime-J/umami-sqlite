@@ -31,8 +31,6 @@ Probably not, they already support multiple databases, and run their cloud offer
 Which is already a cool thing (not to mention that it's open source).\
 Thanks to them for all of that!
 
-Moreover, SQLite isn't totally on par feature wise with PostgreSQL and MySQL in Prisma (the ORM used for relational dbs).
-
 ## SQLite specificities in latest version
 Rowid tables are used, WITHOUT ROWID leading to a larger database file with Umami.
 
