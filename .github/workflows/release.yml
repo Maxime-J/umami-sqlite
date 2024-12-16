@@ -1,0 +1,46 @@
+name: Release
+run-name: Patch and release
+on: workflow_dispatch
+
+permissions:
+  contents: write
+
+env:
+  RELEASE_FILE: umami-sqlite.zip
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare
+        run: |
+          echo 'work' > .gitignore
+          mkdir work
+
+      - name: Get Umami version
+        run: |
+          PATCH_FILE=$(ls *.patch)
+          echo "UMAMI_VERSION=v${PATCH_FILE%.*}" >> $GITHUB_ENV
+
+      - name: Download Umami
+        run: |
+          cd work
+          wget https://github.com/umami-software/umami/archive/refs/tags/$UMAMI_VERSION.zip
+          unzip -q $UMAMI_VERSION.zip
+
+      - name: Apply patch and zip
+        run: |
+          cd work
+          UMAMI_FOLDER=$(ls -d umami-*)
+          cd $UMAMI_FOLDER
+          patch -p1 < ../../*.patch
+          cd ..
+          zip -q -r $RELEASE_FILE $UMAMI_FOLDER
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $UMAMI_VERSION work/$RELEASE_FILE --generate-notes --draft

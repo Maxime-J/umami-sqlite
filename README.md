@@ -1,30 +1,21 @@
 # SQLite support for [Umami](https://github.com/umami-software/umami)
 This repository contains a patch to bring SQLite support to Umami, keeping all other features intact.\
-Patch is named after the supported, tested Umami released version, and I will generally wait that there's no upcoming fixes or soon to be released version before making a new one.
+Patch is named after the supported, tested Umami released version.
 
-## Why not a fork ?
-A way to keep the official repository as the main source.\
-Plus, although being totally stable and useable, I consider this an experimental feature, which requires some workarounds.
+Although being totally stable and useable, I consider this an experimental feature.
 
-## How ?
-The following has to be done before building Umami:
+## Getting Umami with SQLite
+Latest patched Umami is available in the releases.
 
-- Place the patch file in Umami's root, and apply it from there with:\
-`patch -p1 < version.patch`
+Patch can also be applied manually, by placing it in Umami's root, and applying from there with:\
+`patch -p1 < version.patch` (reversible with `patch -p1 -R < version.patch`)
 
-- In `.env`, configure Umami to use SQLite with\
+## Configuration
+Before building, in `.env`configure Umami to use SQLite with\
 `DATABASE_URL=file:`*path*
 
 An absolute path is recommended `DATABASE_URL=file:/absolute/path/to/database.db`\
 Using Docker, that path should likely lead to the mount point of a volume, for data persistence.
-
-## How to update ?
-If you cloned the Umami repository, reverse the patch before pulling updates
-```
-patch -p1 -R < version.patch
-git pull
-```
-And apply the new one.
 
 ## Could Umami support it ?
 Probably not, they already support multiple databases, and run their cloud offer.\
