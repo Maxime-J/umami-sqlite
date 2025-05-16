@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: umami
+  annotations:
+    io.podman.annotations.init/app: "TRUE"
+spec:
+  containers:
+  - name: app
+    image: ghcr.io/maxime-j/umami-sqlite:latest
+    ports:
+    - containerPort: 3000
+    # not exposed by default, with podman you can at your preference:
+    #
+    # use 3000:3000
+    # either as --publish option of podman kube play
+    # or as PublishPort option in [Kube] section of a .kube Quadlet unit
+    #
+    # uncommment next line (not recommended with Kubernetes)
+    # - hostPort: 3000
+    env:
+    - name: DATABASE_URL
+      value: "file:/db/umami.db"
+    - name: APP_SECRET
+      value: "replace-me-with-a-random-string"
+    volumeMounts:
+    - mountPath: /db
+      name: umami-db-data
+  volumes:
+  - name: umami-db-data
+    persistentVolumeClaim:
+      claimName: umami-db-data

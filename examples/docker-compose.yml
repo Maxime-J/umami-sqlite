@@ -1,0 +1,15 @@
+---
+services:
+  umami:
+    image: ghcr.io/maxime-j/umami-sqlite:latest
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: file:/db/umami.db
+      APP_SECRET: replace-me-with-a-random-string
+    volumes:
+      - umami-db-data:/db
+    init: true
+    restart: always
+volumes:
+  umami-db-data:
