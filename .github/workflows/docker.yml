@@ -94,5 +94,5 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker manifest create ${REGISTRY_IMAGE}:latest \
-            $(printf -- '--amend ${REGISTRY_IMAGE}@sha256:%s ' *)
+            $(printf -- "--amend ${REGISTRY_IMAGE}@sha256:%s " *)
           docker manifest push ${REGISTRY_IMAGE}:latest
