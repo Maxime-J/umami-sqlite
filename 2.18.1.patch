@@ -1361,7 +1361,7 @@ index 0ffedd0..856ab92 100644
  
  export function notImplemented() {
 diff --git a/src/lib/prisma.ts b/src/lib/prisma.ts
-index b611123..01a95f8 100644
+index b611123..2c5b740 100644
 --- a/src/lib/prisma.ts
 +++ b/src/lib/prisma.ts
 @@ -2,7 +2,7 @@ import debug from 'debug';
@@ -1400,7 +1400,7 @@ index b611123..01a95f8 100644
    const db = getDatabaseType();
  
 +  if (db === SQLITE) {
-+    return `(${field2} - ${field1}) / 86400000`;
++    return `(unixepoch(${field1}) - unixepoch(${field2})) / 86400`;
 +  }
 +
    if (db === POSTGRESQL) {
