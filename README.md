@@ -26,12 +26,8 @@ Probably not.\
 Each database eventually requires tailoring to match its specificities, or lack of features, like SQLite not having a storage class for dates/times.\
 Supporting it officially could represent a significant amount of time, and it would add another source of issues (they already had a bunch because of their multiple db support).
 
-## Added scripts
-SQLite specific scripts are added in `scripts/sqlite` folder:
-
-`vacuum.js` to execute VACUUM command on the database. You might want to run it sometimes:
+## SQLite specific
+`sqlite-vacuum.js` is added in `scripts` folder to execute VACUUM command on the database. You might want to run it sometimes:
 >-Frequent inserts, updates, and deletes can cause the database file to become fragmented - where data for a single table or index is scattered around the database file. Running VACUUM ensures that each table and index is largely stored contiguously within the database file. In some cases, VACUUM may also reduce the number of partially filled pages in the database, reducing the size of the database file further.
 >
 >-When content is deleted from an SQLite database, the content is not usually erased but rather the space used to hold the content is marked as being available for reuse. [...] Running VACUUM will clean the database of all traces of deleted content.
-
-`convert-utm-clid-columns.js` to convert unprocessed data from versions 2.18 and earlier.
