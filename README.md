@@ -1,5 +1,5 @@
 # SQLite support for [Umami](https://github.com/umami-software/umami)
-This repository contains a patch bringing SQLite support to Umami.\
+This repository contains a patch bringing SQLite support to Umami (replacing PostgreSQL).\
 Patch is named after the supported Umami released version.
 
 ## Getting Umami with SQLite
