@@ -12,6 +12,8 @@ Multiple ways are possible:
 
 - A pre-built Docker image is available on `ghcr.io/maxime-j/umami-sqlite:latest`
 
+- A full terraform setup can be found in the examples folder (the given example uses hetzner, replace with your own cloud provider)
+
 ## Configuration
 Before building, in `.env` configure Umami to use SQLite with\
 `DATABASE_URL=file:`*path*
