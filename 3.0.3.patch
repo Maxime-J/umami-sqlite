@@ -203,7 +203,7 @@ index 9df75189..00000000
 -WHERE ed.data_key like '%revenue%';
 \ No newline at end of file
 diff --git a/package.json b/package.json
-index 09a69135..cbf69a82 100644
+index 76b1e1fa..88d507e8 100644
 --- a/package.json
 +++ b/package.json
 @@ -67,15 +67,15 @@
@@ -231,7 +231,7 @@ index 09a69135..cbf69a82 100644
 -    "pg": "^8.16.3",
      "prisma": "^6.18.0",
      "pure-rand": "^7.0.1",
-     "react": "^19.2.1",
+     "react": "^19.2.3",
 diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
 index 5e236fb7..9d5f3f98 100644
 --- a/pnpm-workspace.yaml
