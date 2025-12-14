@@ -12,8 +12,6 @@ Multiple ways are possible:
 
 - A pre-built Docker image is available on `ghcr.io/maxime-j/umami-sqlite:latest`
 
-- A full terraform setup can be found in the examples folder (the given example uses hetzner, replace with your own cloud provider)
-
 ## Configuration
 Before building, in `.env` configure Umami to use SQLite with\
 `DATABASE_URL=file:`*path*
@@ -21,7 +19,7 @@ Before building, in `.env` configure Umami to use SQLite with\
 An absolute path is recommended `DATABASE_URL=file:/absolute/path/to/database.db`
 
 With the Docker image, `DATABASE_URL` needs to be set as an env var and should lead to a volume mounted on `/db`.\
-A Compose file and a Kubernetes YAML (designed for Podman use) are available in the [examples](examples).
+Usage examples of this image are available in the [examples](examples) folder.
 
 ## Could it be officially supported?
 Probably not.\

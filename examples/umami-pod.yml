@@ -1,3 +1,5 @@
+# Designed for Podman use
+
 apiVersion: v1
 kind: Pod
 metadata:

@@ -1,9 +1,20 @@
 # =============================================================================
-# Umami - Privacy-focused web analytics
+# k8s setup with traefik ingress, cert manager, network policies and pvc
 # =============================================================================
-# Deploys Umami with SQLite backend for lightweight web analytics.
-# Uses community SQLite fork: https://github.com/Maxime-J/umami-sqlite
-# =============================================================================
+
+# -----------------------------------------------------------------------------
+# VARIABLES
+# -----------------------------------------------------------------------------
+
+variable "umami_domain" {
+  description = "Domain used to access Umami"
+  type        = string
+}
+
+variable "pvc_storage_class" {
+  description = "PVC Storage Class (e.g.: hcloud-volumes on Hetzner)"
+  type        = string
+}
 
 # -----------------------------------------------------------------------------
 # NAMESPACE
@@ -60,7 +71,7 @@ resource "kubectl_manifest" "umami_pvc" {
     spec:
       accessModes:
         - ReadWriteOnce
-      storageClassName: hcloud-volumes # This is for hetzner, replace with your cloud provider
+      storageClassName: ${var.pvc_storage_class}
       resources:
         requests:
           storage: 1Gi
