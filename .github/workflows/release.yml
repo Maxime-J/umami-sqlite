@@ -42,6 +42,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create $UMAMI_VERSION $RELEASE_FILE \
+            --title "$UMAMI_VERSION" \
             --notes "https://github.com/umami-software/umami/releases/tag/$UMAMI_VERSION" \
             --draft \
             --repo $GITHUB_REPOSITORY
