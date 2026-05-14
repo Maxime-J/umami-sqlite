@@ -1,0 +1,911 @@
+diff --git a/src/lib/prisma.ts b/src/lib/prisma.ts
+index 5c892b45..82765aee 100644
+--- a/src/lib/prisma.ts
++++ b/src/lib/prisma.ts
+@@ -1,4 +1,5 @@
+ import { join } from 'node:path';
++import { formatInTimeZone } from 'date-fns-tz';
+ import debug from 'debug';
+ import { PrismaSqlite } from 'prisma-adapter-sqlite';
+ import { PrismaClient } from '@/generated/prisma/client';
+@@ -20,55 +21,62 @@ const PRISMA_LOG_OPTIONS = {
+ };
+ 
+ const DATE_FORMATS = {
+-  minute: 'YYYY-MM-DD HH24:MI:00',
+-  hour: 'YYYY-MM-DD HH24:00:00',
+-  day: 'YYYY-MM-DD HH24:00:00',
+-  month: 'YYYY-MM-01 HH24:00:00',
+-  year: 'YYYY-01-01 HH24:00:00',
++  minute: '%Y-%m-%d %H:%M:00',
++  hour: '%Y-%m-%d %H:00:00',
++  day: '%Y-%m-%d 00:00:00',
++  month: '%Y-%m-01 00:00:00',
++  year: '%Y-01-01 00:00:00',
+ };
+ 
+ const DATE_FORMATS_UTC = {
+-  minute: 'YYYY-MM-DD"T"HH24:MI:00"Z"',
+-  hour: 'YYYY-MM-DD"T"HH24:00:00"Z"',
+-  day: 'YYYY-MM-DD"T"HH24:00:00"Z"',
+-  month: 'YYYY-MM-01"T"HH24:00:00"Z"',
+-  year: 'YYYY-01-01"T"HH24:00:00"Z"',
++  minute: '%Y-%m-%dT%H:%M:00Z',
++  hour: '%Y-%m-%dT%H:00:00Z',
++  day: '%Y-%m-%dT00:00:00Z',
++  month: '%Y-%m-01T00:00:00Z',
++  year: '%Y-01-01T00:00:00Z',
+ };
+ 
+ function getAddIntervalQuery(field: string, interval: string): string {
+-  return `${field} + interval '${interval}'`;
++  return `strftime('%s', ${field} / 1000, 'unixepoch', '${interval}')`;
+ }
+ 
+ function getDayDiffQuery(field1: string, field2: string): string {
+-  return `${field1}::date - ${field2}::date`;
++  return `(unixepoch(${field1}) - unixepoch(${field2})) / 86400`;
+ }
+ 
+ function getCastColumnQuery(field: string, type: string): string {
+-  return `${field}::${type}`;
++  return `CAST(${field} as ${type})`;
++}
++
++function getIsoDateSQL(field: string): string {
++  return `strftime('%Y-%m-%dT%H:%M:%SZ', ${field} / 1000, 'unixepoch')`;
+ }
+ 
+ function getDateSQL(field: string, unit: string, timezone?: string): string {
+   if (timezone && timezone !== 'utc') {
+-    return `to_char(date_trunc('${unit}', ${field} at time zone '${timezone}'), '${DATE_FORMATS[unit]}')`;
++    const tz = formatInTimeZone(new Date(), timezone, 'xxx').substring(0, 3);
++    return `strftime('${DATE_FORMATS[unit]}', ${field} / 1000, 'unixepoch', '${tz} hours')`;
+   }
+ 
+-  return `to_char(date_trunc('${unit}', ${field}), '${DATE_FORMATS_UTC[unit]}')`;
++  return `strftime('${DATE_FORMATS_UTC[unit]}', ${field} / 1000, 'unixepoch')`;
+ }
+ 
+ function getDateWeeklySQL(field: string, timezone?: string) {
+-  return `concat(extract(dow from (${field} at time zone '${timezone}')), ':', to_char((${field} at time zone '${timezone}'), 'HH24'))`;
++  const tz = formatInTimeZone(new Date(), timezone, 'xxx').substring(0, 3);
++  return `strftime('%w:%H', ${field} / 1000, 'unixepoch', '${tz} hours')`;
+ }
+ 
+ export function getTimestampSQL(field: string) {
+-  return `floor(extract(epoch from ${field}))`;
++  return `${field} / 1000`;
+ }
+ 
+ function getTimestampDiffSQL(field1: string, field2: string): string {
+-  return `floor(extract(epoch from (${field2} - ${field1})))`;
++  return `(${field2} - ${field1}) / 1000`;
+ }
+ 
++
+ function getSearchSQL(column: string, param: string = 'search'): string {
+-  return `and ${column} ilike {{${param}}}`;
++  return `and ${column} like {{${param}}}`;
+ }
+ 
+ function mapFilter(
+@@ -89,17 +97,17 @@ function mapFilter(
+ 
+   switch (operator) {
+     case OPERATORS.equals:
+-      return `${table}.${column} = ANY(${value})`;
++      return `${table}.${column} in (${value})`;
+     case OPERATORS.notEquals:
+-      return `${table}.${column} != ALL(${value})`;
++      return `${table}.${column} not in (${value})`;
+     case OPERATORS.contains:
+-      return `${table}.${column} ilike ${value}`;
++      return `${table}.${column} like ${value}`;
+     case OPERATORS.doesNotContain:
+-      return `${table}.${column} not ilike ${value}`;
++      return `${table}.${column} not like ${value}`;
+     case OPERATORS.regex:
+-      return `${table}.${column} ~* ${value}`;
++      return `${table}.${column} regexp ${value}`;
+     case OPERATORS.notRegex:
+-      return `${table}.${column} !~* ${value}`;
++      return `${table}.${column} not regexp ${value}`;
+     default:
+       return '';
+   }
+@@ -131,7 +139,7 @@ function getFilterQuery(filters: Record<string, any>, options: QueryOptions = {}
+ 
+         if (name === 'referrer') {
+           andClauses.push(
+-            `and (website_event.referrer_domain != regexp_replace(website_event.hostname, '^www.', '') or website_event.referrer_domain is null)`,
++            `and (website_event.referrer_domain != iif(website_event.hostname like 'www.%', substr(website_event.hostname, 5), website_event.hostname) or website_event.referrer_domain is null)`,
+           );
+         }
+       }
+@@ -219,7 +227,7 @@ function getQueryParams(filters: Record<string, any>) {
+       if (([OPERATORS.contains, OPERATORS.doesNotContain] as Operator[]).includes(operator)) {
+         obj[key] = `%${value}%`;
+       } else if (([OPERATORS.equals, OPERATORS.notEquals] as Operator[]).includes(operator)) {
+-        obj[key] = Array.isArray(value) ? value : [value];
++        obj[key] = Array.isArray(value) ? value.join(',') : value;
+       } else {
+         obj[key] = value;
+       }
+@@ -259,11 +267,6 @@ async function rawQuery(sql: string, data: Record<string, any>, name?: string):
+     log('NAME:\n', name);
+   }
+   const params = [];
+-  const schema = getSchema();
+-
+-  if (schema) {
+-    await client.$executeRawUnsafe(`SET search_path TO "${schema}";`);
+-  }
+ 
+   const query = sql?.replaceAll(/\{\{\s*(\w+)(::\w+)?\s*}}/g, (...args) => {
+     const [, name, type] = args;
+@@ -272,12 +275,9 @@ async function rawQuery(sql: string, data: Record<string, any>, name?: string):
+ 
+     params.push(value);
+ 
+-    return `$${params.length}${type ?? ''}`;
++    return '?';
+   });
+ 
+-  if (process.env.DATABASE_REPLICA_URL && '$replica' in client) {
+-    return client.$replica().$queryRawUnsafe(query, ...params);
+-  }
+   return client.$queryRawUnsafe(query, ...params);
+ }
+ 
+@@ -396,6 +396,7 @@ export default {
+   getDateSQL,
+   getDateWeeklySQL,
+   getFilterQuery,
++  getIsoDateSQL,
+   getSearchParameters,
+   getTimestampDiffSQL,
+   getSearchSQL,
+diff --git a/src/queries/sql/events/getEventData.ts b/src/queries/sql/events/getEventData.ts
+index 4a3fac86..21cc1820 100644
+--- a/src/queries/sql/events/getEventData.ts
++++ b/src/queries/sql/events/getEventData.ts
+@@ -14,7 +14,7 @@ export async function getEventData(...args: [websiteId: string, filters: QueryFi
+ }
+ 
+ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+-  const { rawQuery, parseFilters } = prisma;
++  const { rawQuery, parseFilters, getIsoDateSQL } = prisma;
+   const { page = 1, pageSize } = filters;
+   const size = +pageSize || DEFAULT_PAGE_SIZE;
+   const offset = +size * (+page - 1);
+@@ -58,9 +58,9 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       event_data.data_key as "dataKey",
+       event_data.string_value as "stringValue",
+       event_data.number_value as "numberValue",
+-      event_data.date_value as "dateValue",
++      ${getIsoDateSQL('event_data.date_value')} as "dateValue",
+       event_data.data_type as "dataType",
+-      event_data.created_at as "createdAt"
++      ${getIsoDateSQL('event_data.created_at')} as "createdAt"
+     from event_data
+     join website_event on website_event.event_id = event_data.website_event_id
+       and website_event.website_id = {{websiteId::uuid}}
+diff --git a/src/queries/sql/events/getEventDataById.ts b/src/queries/sql/events/getEventDataById.ts
+index 8abd5808..a3c712b7 100644
+--- a/src/queries/sql/events/getEventDataById.ts
++++ b/src/queries/sql/events/getEventDataById.ts
+@@ -15,7 +15,7 @@ export async function getEventDataById(
+ }
+ 
+ async function relationalQuery(websiteId: string, eventId: string) {
+-  const { rawQuery } = prisma;
++  const { rawQuery, getIsoDateSQL } = prisma;
+ 
+   return rawQuery(
+     `
+@@ -25,9 +25,9 @@ async function relationalQuery(websiteId: string, eventId: string) {
+        event_data.data_key as "dataKey",
+        event_data.string_value as "stringValue",
+        event_data.number_value as "numberValue",
+-       event_data.date_value as "dateValue",
++       ${getIsoDateSQL('event_data.date_value')} as "dateValue",
+        event_data.data_type as "dataType",
+-       event_data.created_at as "createdAt"
++       ${getIsoDateSQL('event_data.created_at')} as "createdAt"
+     from event_data
+     join website_event on website_event.event_id = event_data.website_event_id
+       and website_event.website_id = {{websiteId::uuid}}
+diff --git a/src/queries/sql/events/getWebsiteEventStats.ts b/src/queries/sql/events/getWebsiteEventStats.ts
+index 27179d10..c4ed7a69 100644
+--- a/src/queries/sql/events/getWebsiteEventStats.ts
++++ b/src/queries/sql/events/getWebsiteEventStats.ts
+@@ -34,7 +34,7 @@ async function relationalQuery(
+   return rawQuery(
+     `
+     select
+-      cast(coalesce(sum(t.c), 0) as bigint) as "events",
++      coalesce(sum(t.c), 0) as "events",
+       count(distinct t.session_id) as "visitors",
+       count(distinct t.visit_id) as "visits",
+       count(distinct t.event_name) as "uniqueEvents"
+diff --git a/src/queries/sql/events/getWebsiteEvents.ts b/src/queries/sql/events/getWebsiteEvents.ts
+index f11d3ff1..15c35834 100644
+--- a/src/queries/sql/events/getWebsiteEvents.ts
++++ b/src/queries/sql/events/getWebsiteEvents.ts
+@@ -13,7 +13,7 @@ export function getWebsiteEvents(...args: [websiteId: string, filters: QueryFilt
+ }
+ 
+ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+-  const { pagedRawQuery, parseFilters } = prisma;
++  const { pagedRawQuery, parseFilters, getIsoDateSQL } = prisma;
+   const { search } = filters;
+   const { filterQuery, dateQuery, cohortQuery, queryParams } = parseFilters({
+     ...filters,
+@@ -21,8 +21,8 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+   });
+ 
+   const searchQuery = search
+-    ? `and ((event_name ilike {{search}} and event_type = 2)
+-           or (url_path ilike {{search}} and event_type = 1))`
++    ? `and ((event_name like {{search}} and event_type = 2)
++           or (url_path like {{search}} and event_type = 1))`
+     : '';
+ 
+   return pagedRawQuery(
+@@ -31,7 +31,7 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       website_event.event_id as "id",
+       website_event.website_id as "websiteId", 
+       website_event.session_id as "sessionId",
+-      website_event.created_at as "createdAt",
++      ${getIsoDateSQL('website_event.created_at')} as "createdAt",
+       website_event.hostname,
+       website_event.url_path as "urlPath",
+       website_event.url_query as "urlQuery",
+diff --git a/src/queries/sql/getChannelExpandedMetrics.ts b/src/queries/sql/getChannelExpandedMetrics.ts
+index c43e2544..5c1dac02 100644
+--- a/src/queries/sql/getChannelExpandedMetrics.ts
++++ b/src/queries/sql/getChannelExpandedMetrics.ts
+@@ -84,16 +84,16 @@ async function relationalQuery(
+       channels as (
+         select case
+             when referrer_domain = '' and url_query = '' then 'direct'
+-            when ${toPostgresPositionClause('url_query', PAID_AD_PARAMS)} then 'paidAds'
+-            when ${toPostgresPositionClause('utm_medium', ['referral', 'app', 'link'])} then 'referral'
+-            when utm_medium ilike '%affiliate%' then 'affiliate'
+-            when utm_medium ilike '%sms%' or utm_source ilike '%sms%' then 'sms'
+-            when ${toPostgresPositionClause('referrer_domain', SEARCH_DOMAINS)} or utm_medium ilike '%organic%' then concat(prefix, 'Search')
+-            when ${toPostgresPositionClause('referrer_domain', SOCIAL_DOMAINS)} then concat(prefix, 'Social')
+-            when ${toPostgresPositionClause('referrer_domain', EMAIL_DOMAINS)} or utm_medium ilike '%mail%' then 'email'
+-            when ${toPostgresPositionClause('referrer_domain', SHOPPING_DOMAINS)} or utm_medium ilike '%shop%' then concat(prefix, 'Shopping')
+-            when ${toPostgresPositionClause('referrer_domain', VIDEO_DOMAINS)} or utm_medium ilike '%video%' then concat(prefix, 'Video')
+-            when referrer_domain != regexp_replace(hostname, '^www.', '') and referrer_domain != '' then 'referral'
++            when ${toPositionClause('url_query', PAID_AD_PARAMS)} then 'paidAds'
++            when ${toPositionClause('utm_medium', ['referral', 'app', 'link'])} then 'referral'
++            when utm_medium like '%affiliate%' then 'affiliate'
++            when utm_medium like '%sms%' or utm_source like '%sms%' then 'sms'
++            when ${toPositionClause('referrer_domain', SEARCH_DOMAINS)} or utm_medium like '%organic%' then concat(prefix, 'Search')
++            when ${toPositionClause('referrer_domain', SOCIAL_DOMAINS)} then concat(prefix, 'Social')
++            when ${toPositionClause('referrer_domain', EMAIL_DOMAINS)} or utm_medium like '%mail%' then 'email'
++            when ${toPositionClause('referrer_domain', SHOPPING_DOMAINS)} or utm_medium like '%shop%' then concat(prefix, 'Shopping')
++            when ${toPositionClause('referrer_domain', VIDEO_DOMAINS)} or utm_medium like '%video%' then concat(prefix, 'Video')
++            when referrer_domain != iif(hostname like 'www.%', substr(hostname, 5), hostname) and referrer_domain != '' then 'referral'
+             else '' end as "name",
+             session_id,
+             visit_id,
+@@ -193,6 +193,6 @@ function toClickHouseStringArray(arr: string[]): string {
+   return arr.map(p => `'${p.replace(/'/g, "\\'")}'`).join(', ');
+ }
+ 
+-function toPostgresPositionClause(column: string, arr: string[]) {
+-  return arr.map(val => `${column} ilike '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
++function toPositionClause(column: string, arr: string[]) {
++  return arr.map(val => `${column} like '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
+ }
+diff --git a/src/queries/sql/getChannelMetrics.ts b/src/queries/sql/getChannelMetrics.ts
+index da28c049..56ef62db 100644
+--- a/src/queries/sql/getChannelMetrics.ts
++++ b/src/queries/sql/getChannelMetrics.ts
+@@ -53,16 +53,16 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+     channels as (
+       select case
+           when referrer_domain = '' and url_query = '' then 'direct'
+-          when ${toPostgresLikeClause('url_query', PAID_AD_PARAMS)} then 'paidAds'
+-          when ${toPostgresLikeClause('utm_medium', ['referral', 'app', 'link'])} then 'referral'
+-          when utm_medium ilike '%affiliate%' then 'affiliate'
+-          when utm_medium ilike '%sms%' or utm_source ilike '%sms%' then 'sms'
+-          when ${toPostgresLikeClause('referrer_domain', SEARCH_DOMAINS)} or utm_medium ilike '%organic%' then concat(prefix, 'Search')
+-          when ${toPostgresLikeClause('referrer_domain', SOCIAL_DOMAINS)} then concat(prefix, 'Social')
+-          when ${toPostgresLikeClause('referrer_domain', EMAIL_DOMAINS)} or utm_medium ilike '%mail%' then 'email'
+-          when ${toPostgresLikeClause('referrer_domain', SHOPPING_DOMAINS)} or utm_medium ilike '%shop%' then concat(prefix, 'Shopping')
+-          when ${toPostgresLikeClause('referrer_domain', VIDEO_DOMAINS)} or utm_medium ilike '%video%' then concat(prefix, 'Video')
+-          when referrer_domain != regexp_replace(hostname, '^www.', '') and referrer_domain != '' then 'referral'
++          when ${toLikeClause('url_query', PAID_AD_PARAMS)} then 'paidAds'
++          when ${toLikeClause('utm_medium', ['referral', 'app', 'link'])} then 'referral'
++          when utm_medium like '%affiliate%' then 'affiliate'
++          when utm_medium like '%sms%' or utm_source like '%sms%' then 'sms'
++          when ${toLikeClause('referrer_domain', SEARCH_DOMAINS)} or utm_medium like '%organic%' then concat(prefix, 'Search')
++          when ${toLikeClause('referrer_domain', SOCIAL_DOMAINS)} then concat(prefix, 'Social')
++          when ${toLikeClause('referrer_domain', EMAIL_DOMAINS)} or utm_medium like '%mail%' then 'email'
++          when ${toLikeClause('referrer_domain', SHOPPING_DOMAINS)} or utm_medium like '%shop%' then concat(prefix, 'Shopping')
++          when ${toLikeClause('referrer_domain', VIDEO_DOMAINS)} or utm_medium like '%video%' then concat(prefix, 'Video')
++          when referrer_domain != iif(hostname like 'www.%', substr(hostname, 5), hostname) and referrer_domain != '' then 'referral'
+           else '' end AS x,
+         count(distinct session_id) y
+       from prefix
+@@ -144,6 +144,6 @@ function toClickHouseStringArray(arr: string[]): string {
+   return arr.map(p => `'${p.replace(/'/g, "\\'")}'`).join(', ');
+ }
+ 
+-function toPostgresLikeClause(column: string, arr: string[]) {
+-  return arr.map(val => `${column} ilike '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
++function toLikeClause(column: string, arr: string[]) {
++  return arr.map(val => `${column} like '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
+ }
+diff --git a/src/queries/sql/getRealtimeActivity.ts b/src/queries/sql/getRealtimeActivity.ts
+index c847b6f7..a265e99a 100644
+--- a/src/queries/sql/getRealtimeActivity.ts
++++ b/src/queries/sql/getRealtimeActivity.ts
+@@ -13,7 +13,7 @@ export async function getRealtimeActivity(...args: [websiteId: string, filters:
+ }
+ 
+ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+-  const { rawQuery, parseFilters } = prisma;
++  const { rawQuery, parseFilters, getIsoDateSQL } = prisma;
+   const { queryParams, filterQuery, cohortQuery, dateQuery } = parseFilters({
+     ...filters,
+     websiteId,
+@@ -24,7 +24,7 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+     select
+         website_event.session_id as "sessionId",
+         website_event.event_name as "eventName",
+-        website_event.created_at as "createdAt",
++        ${getIsoDateSQL('website_event.created_at')} as "createdAt",
+         session.browser,
+         session.os,
+         session.device,
+diff --git a/src/queries/sql/getValues.ts b/src/queries/sql/getValues.ts
+index 8573335b..2d65424f 100644
+--- a/src/queries/sql/getValues.ts
++++ b/src/queries/sql/getValues.ts
+@@ -23,7 +23,7 @@ async function relationalQuery(websiteId: string, column: string, filters: Query
+   let excludeDomain = '';
+ 
+   if (column === 'referrer_domain') {
+-    excludeDomain = `and website_event.referrer_domain != regexp_replace(website_event.hostname, '^www.', '')
++    excludeDomain = `and website_event.referrer_domain != iif(website_event.hostname like 'www.%', substr(website_event.hostname, 5), website_event.hostname)
+       and website_event.referrer_domain != ''`;
+   }
+ 
+diff --git a/src/queries/sql/getWebsiteDateRange.ts b/src/queries/sql/getWebsiteDateRange.ts
+index d6333ad5..20d3720d 100644
+--- a/src/queries/sql/getWebsiteDateRange.ts
++++ b/src/queries/sql/getWebsiteDateRange.ts
+@@ -11,7 +11,7 @@ export async function getWebsiteDateRange(...args: [websiteId: string]) {
+ }
+ 
+ async function relationalQuery(websiteId: string) {
+-  const { rawQuery, parseFilters } = prisma;
++  const { rawQuery, parseFilters, getIsoDateSQL } = prisma;
+   const { queryParams } = parseFilters({
+     startDate: new Date(DEFAULT_RESET_DATE),
+     websiteId,
+@@ -20,8 +20,8 @@ async function relationalQuery(websiteId: string) {
+   const result = await rawQuery(
+     `
+     select
+-      min(created_at) as "startDate",
+-      max(created_at) as "endDate"
++      ${getIsoDateSQL('min(created_at)')} as "startDate",
++      ${getIsoDateSQL('max(created_at)')} as "endDate"
+     from website_event
+     where website_id = {{websiteId::uuid}}
+       and created_at >= {{startDate}}
+diff --git a/src/queries/sql/getWebsiteStats.ts b/src/queries/sql/getWebsiteStats.ts
+index 527b9c15..dd998b48 100644
+--- a/src/queries/sql/getWebsiteStats.ts
++++ b/src/queries/sql/getWebsiteStats.ts
+@@ -40,11 +40,11 @@ async function relationalQuery(
+   return rawQuery(
+     `
+     select
+-      cast(coalesce(sum(t.c), 0) as bigint) as "pageviews",
++      coalesce(sum(t.c), 0) as "pageviews",
+       count(distinct t.session_id) as "visitors",
+       count(distinct t.visit_id) as "visits",
+       ${bounceQuery} as "bounces",
+-      cast(coalesce(sum(${getTimestampDiffSQL('t.min_time', 't.max_time')}), 0) as bigint) as "totaltime"
++      coalesce(sum(${getTimestampDiffSQL('t.min_time', 't.max_time')}), 0) as "totaltime"
+     from (
+       select
+         website_event.session_id,
+diff --git a/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts b/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts
+index a0c489ac..78299fe3 100644
+--- a/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts
++++ b/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts
+@@ -51,10 +51,10 @@ async function relationalQuery(
+   let excludeDomain = '';
+ 
+   if (column === 'referrer_domain') {
+-    excludeDomain = `and website_event.referrer_domain != regexp_replace(website_event.hostname, '^www.', '')
++    excludeDomain = `and website_event.referrer_domain != iif(website_event.hostname like 'www.%', substr(website_event.hostname, 5), website_event.hostname)
+       and website_event.referrer_domain != ''`;
+     if (type === 'domain') {
+-      column = toPostgresGroupedReferrer(GROUPED_DOMAINS);
++      column = toGroupedReferrer(GROUPED_DOMAINS);
+     }
+   }
+ 
+@@ -209,7 +209,7 @@ export function toClickHouseGroupedReferrer(
+   ].join('\n');
+ }
+ 
+-export function toPostgresGroupedReferrer(
++export function toGroupedReferrer(
+   domains: any[],
+   column: string = 'referrer_domain',
+ ): string {
+@@ -218,13 +218,13 @@ export function toPostgresGroupedReferrer(
+     ...domains.map(group => {
+       const matches = Array.isArray(group.match) ? group.match : [group.match];
+ 
+-      return `WHEN ${toPostgresLikeClause(column, matches)} THEN '${group.domain}'`;
++      return `WHEN ${toLikeClause(column, matches)} THEN '${group.domain}'`;
+     }),
+     "  ELSE 'Other'",
+     'END',
+   ].join('\n');
+ }
+ 
+-function toPostgresLikeClause(column: string, arr: string[]) {
+-  return arr.map(val => `${column} ilike '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
++function toLikeClause(column: string, arr: string[]) {
++  return arr.map(val => `${column} like '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
+ }
+diff --git a/src/queries/sql/pageviews/getPageviewMetrics.ts b/src/queries/sql/pageviews/getPageviewMetrics.ts
+index a7a705f1..dca09c4c 100644
+--- a/src/queries/sql/pageviews/getPageviewMetrics.ts
++++ b/src/queries/sql/pageviews/getPageviewMetrics.ts
+@@ -47,7 +47,7 @@ async function relationalQuery(
+   let excludeDomain = '';
+ 
+   if (column === 'referrer_domain') {
+-    excludeDomain = `and website_event.referrer_domain != regexp_replace(website_event.hostname, '^www.', '')
++    excludeDomain = `and website_event.referrer_domain != iif(website_event.hostname like 'www.%', substr(website_event.hostname, 5), website_event.hostname)
+       and website_event.referrer_domain != ''`;
+   }
+ 
+@@ -57,14 +57,21 @@ async function relationalQuery(
+ 
+     entryExitQuery = `
+       join (
+-        select distinct on (visit_id)
+-          visit_id,
+-          url_path
+-        from website_event
+-        where website_event.website_id = {{websiteId::uuid}}
+-          and website_event.created_at between {{startDate}} and {{endDate}}
+-          and website_event.event_type NOT IN (2, 5)
+-        order by visit_id, created_at ${order}
++        select visit_id, url_path
++        from (
++          select
++            visit_id,
++            url_path,
++            row_number() over (
++              partition by visit_id
++              order by created_at ${order}
++            ) as rn
++          from website_event
++          where website_event.website_id = {{websiteId::uuid}}
++            and website_event.created_at between {{startDate}} and {{endDate}}
++            and website_event.event_type NOT IN (2, 5)
++        )
++        where rn = 1
+       ) x
+       on x.visit_id = website_event.visit_id
+     `;
+diff --git a/src/queries/sql/performance/getPerformanceStats.ts b/src/queries/sql/performance/getPerformanceStats.ts
+index 0c2b4950..f476037d 100644
+--- a/src/queries/sql/performance/getPerformanceStats.ts
++++ b/src/queries/sql/performance/getPerformanceStats.ts
+@@ -32,11 +32,11 @@ async function relationalQuery(
+   const result = await rawQuery(
+     `
+     select
+-      percentile_cont(0.75) within group (order by lcp) as lcp,
+-      percentile_cont(0.75) within group (order by inp) as inp,
+-      percentile_cont(0.75) within group (order by cls) as cls,
+-      percentile_cont(0.75) within group (order by fcp) as fcp,
+-      percentile_cont(0.75) within group (order by ttfb) as ttfb,
++      percentile_cont(lcp, 0.75) as lcp,
++      percentile_cont(inp, 0.75) as inp,
++      percentile_cont(cls, 0.75) as cls,
++      percentile_cont(fcp, 0.75) as fcp,
++      percentile_cont(ttfb, 0.75) as ttfb,
+       count(*) as count
+     from website_event
+     ${cohortQuery}
+diff --git a/src/queries/sql/replays/getReplayChunks.ts b/src/queries/sql/replays/getReplayChunks.ts
+index 5c192172..ac73da87 100644
+--- a/src/queries/sql/replays/getReplayChunks.ts
++++ b/src/queries/sql/replays/getReplayChunks.ts
+@@ -23,7 +23,7 @@ export async function getReplayChunks(websiteId: string, visitId: string): Promi
+ }
+ 
+ async function relationalQuery(websiteId: string, visitId: string): Promise<ReplayChunk[]> {
+-  const { rawQuery } = prisma;
++  const { rawQuery, getIsoDateSQL } = prisma;
+ 
+   const chunks: {
+     sessionId: string;
+@@ -41,8 +41,8 @@ async function relationalQuery(websiteId: string, visitId: string): Promise<Repl
+       events,
+       chunk_index as "chunkIndex",
+       event_count as "eventCount",
+-      started_at as "startedAt",
+-      ended_at as "endedAt"
++      ${getIsoDateSQL('started_at')} as "startedAt",
++      ${getIsoDateSQL('ended_at')} as "endedAt"
+     from session_replay
+     where website_id = {{websiteId::uuid}}
+       and visit_id = {{visitId::uuid}}
+diff --git a/src/queries/sql/replays/getSessionReplays.ts b/src/queries/sql/replays/getSessionReplays.ts
+index d7e1535b..e9fbe574 100644
+--- a/src/queries/sql/replays/getSessionReplays.ts
++++ b/src/queries/sql/replays/getSessionReplays.ts
+@@ -15,7 +15,7 @@ export function getSessionReplays(
+ }
+ 
+ async function relationalQuery(websiteId: string, filters: QueryFilters, sessionId?: string) {
+-  const { pagedRawQuery, parseFilters } = prisma;
++  const { pagedRawQuery, parseFilters, getIsoDateSQL } = prisma;
+   const { search } = filters;
+   const { filterQuery, cohortQuery, queryParams } = parseFilters({
+     ...filters,
+@@ -39,11 +39,11 @@ async function relationalQuery(websiteId: string, filters: QueryFilters, session
+   const sessionFilter = sessionId ? 'and sr.session_id = {{sessionId::uuid}}' : '';
+ 
+   const searchQuery = search
+-    ? `and (session.distinct_id ilike {{search}}
+-           or session.city ilike {{search}}
+-           or session.browser ilike {{search}}
+-           or session.os ilike {{search}}
+-           or session.device ilike {{search}})`
++    ? `and (session.distinct_id like {{search}}
++           or session.city like {{search}}
++           or session.browser like {{search}}
++           or session.os like {{search}}
++           or session.device like {{search}})`
+     : '';
+ 
+   return pagedRawQuery(
+@@ -59,10 +59,10 @@ async function relationalQuery(websiteId: string, filters: QueryFilters, session
+       session.city,
+       sum(sr.event_count) as "eventCount",
+       count(sr.replay_id) as "chunkCount",
+-      min(sr.started_at) as "startedAt",
+-      max(sr.ended_at) as "endedAt",
+-      sum(extract(epoch from sr.ended_at - sr.started_at) * 1000)::bigint as "duration",
+-      max(sr.created_at) as "createdAt"
++      ${getIsoDateSQL('min(sr.started_at)')} as "startedAt",
++      ${getIsoDateSQL('max(sr.ended_at)')} as "endedAt",
++      sum(sr.ended_at - sr.started_at) as "duration",
++      ${getIsoDateSQL('max(sr.created_at)')} as "createdAt"
+     from session_replay sr
+     join session on session.session_id = sr.session_id
+       and session.website_id = sr.website_id
+diff --git a/src/queries/sql/reports/getAttribution.ts b/src/queries/sql/reports/getAttribution.ts
+index a25c9289..848a3fd8 100644
+--- a/src/queries/sql/reports/getAttribution.ts
++++ b/src/queries/sql/reports/getAttribution.ts
+@@ -115,7 +115,7 @@ async function relationalQuery(
+     on s.session_id = m.session_id
+     where we.website_id = {{websiteId::uuid}}
+           and we.created_at between {{startDate}} and {{endDate}}
+-          and we.referrer_domain != regexp_replace(we.hostname, '^www.', '')
++          and we.referrer_domain != iif(we.hostname like 'www.%', substr(we.hostname, 5), we.hostname)
+           and we.referrer_domain != ''
+     group by 1
+     order by 2 desc
+diff --git a/src/queries/sql/reports/getFunnel.ts b/src/queries/sql/reports/getFunnel.ts
+index b1b55c2b..39862a14 100644
+--- a/src/queries/sql/reports/getFunnel.ts
++++ b/src/queries/sql/reports/getFunnel.ts
+@@ -72,10 +72,10 @@ async function relationalQuery(
+         let val = f.value;
+         if (f.operator === 'neq') op = '!=';
+         else if (f.operator === 'c') {
+-          op = 'ilike';
++          op = 'like';
+           val = `%${val}%`;
+         } else if (f.operator === 'dnc') {
+-          op = 'not ilike';
++          op = 'not like';
+           val = `%${val}%`;
+         }
+         extraParams[valParam] = val;
+diff --git a/src/queries/sql/reports/getPerformance.ts b/src/queries/sql/reports/getPerformance.ts
+index 9aaaffd9..0a6431a0 100644
+--- a/src/queries/sql/reports/getPerformance.ts
++++ b/src/queries/sql/reports/getPerformance.ts
+@@ -48,9 +48,9 @@ async function relationalQuery(
+     `
+     select
+       ${getDateSQL('created_at', unit, timezone)} t,
+-      percentile_cont(0.5) within group (order by ${metric}) as p50,
+-      percentile_cont(0.75) within group (order by ${metric}) as p75,
+-      percentile_cont(0.95) within group (order by ${metric}) as p95
++      percentile_cont(${metric}, 0.5) as p50,
++      percentile_cont(${metric}, 0.75) as p75,
++      percentile_cont(${metric}, 0.95) as p95
+     from website_event
+     ${cohortQuery}
+     ${joinSessionQuery}
+@@ -67,21 +67,21 @@ async function relationalQuery(
+   const summaryResult = await rawQuery(
+     `
+     select
+-      percentile_cont(0.5) within group (order by lcp) as lcp_p50,
+-      percentile_cont(0.75) within group (order by lcp) as lcp_p75,
+-      percentile_cont(0.95) within group (order by lcp) as lcp_p95,
+-      percentile_cont(0.5) within group (order by inp) as inp_p50,
+-      percentile_cont(0.75) within group (order by inp) as inp_p75,
+-      percentile_cont(0.95) within group (order by inp) as inp_p95,
+-      percentile_cont(0.5) within group (order by cls) as cls_p50,
+-      percentile_cont(0.75) within group (order by cls) as cls_p75,
+-      percentile_cont(0.95) within group (order by cls) as cls_p95,
+-      percentile_cont(0.5) within group (order by fcp) as fcp_p50,
+-      percentile_cont(0.75) within group (order by fcp) as fcp_p75,
+-      percentile_cont(0.95) within group (order by fcp) as fcp_p95,
+-      percentile_cont(0.5) within group (order by ttfb) as ttfb_p50,
+-      percentile_cont(0.75) within group (order by ttfb) as ttfb_p75,
+-      percentile_cont(0.95) within group (order by ttfb) as ttfb_p95,
++      percentile_cont(lcp, 0.5) as lcp_p50,
++      percentile_cont(lcp, 0.75) as lcp_p75,
++      percentile_cont(lcp, 0.95) as lcp_p95,
++      percentile_cont(inp, 0.5) as inp_p50,
++      percentile_cont(inp, 0.75) as inp_p75,
++      percentile_cont(inp, 0.95) as inp_p95,
++      percentile_cont(cls, 0.5) as cls_p50,
++      percentile_cont(cls, 0.75) as cls_p75,
++      percentile_cont(cls, 0.95) as cls_p95,
++      percentile_cont(fcp, 0.5) as fcp_p50,
++      percentile_cont(fcp, 0.75) as fcp_p75,
++      percentile_cont(fcp, 0.95) as fcp_p95,
++      percentile_cont(ttfb, 0.5) as ttfb_p50,
++      percentile_cont(ttfb, 0.75) as ttfb_p75,
++      percentile_cont(ttfb, 0.95) as ttfb_p95,
+       count(*) as count
+     from website_event
+     ${cohortQuery}
+diff --git a/src/queries/sql/reports/getPerformanceMetrics.ts b/src/queries/sql/reports/getPerformanceMetrics.ts
+index 1e7aad48..8015d8a9 100644
+--- a/src/queries/sql/reports/getPerformanceMetrics.ts
++++ b/src/queries/sql/reports/getPerformanceMetrics.ts
+@@ -46,9 +46,9 @@ async function relationalQuery(
+     `
+     select
+       ${column} as "name",
+-      percentile_cont(0.5) within group (order by ${metric}) as p50,
+-      percentile_cont(0.75) within group (order by ${metric}) as p75,
+-      percentile_cont(0.95) within group (order by ${metric}) as p95,
++      percentile_cont(${metric}, 0.5) as p50,
++      percentile_cont(${metric}, 0.75) as p75,
++      percentile_cont(${metric}, 0.95) as p95,
+       count(*) as count
+     from website_event
+     ${cohortQuery}
+diff --git a/src/queries/sql/reports/getRevenueMetrics.ts b/src/queries/sql/reports/getRevenueMetrics.ts
+index 6553d2e0..f37ef269 100644
+--- a/src/queries/sql/reports/getRevenueMetrics.ts
++++ b/src/queries/sql/reports/getRevenueMetrics.ts
+@@ -182,10 +182,10 @@ async function relationalQuery(
+ 
+     revenue_prefix AS (
+       select
+-        case when we.utm_medium ilike '%cp%' OR
+-              we.utm_medium ilike '%ppc%' OR
+-              we.utm_medium ilike '%retargeting%' OR
+-              we.utm_medium ilike '%paid%' then 'paid' else 'organic' end AS prefix,
++        case when we.utm_medium like '%cp%' OR
++              we.utm_medium like '%ppc%' OR
++              we.utm_medium like '%retargeting%' OR
++              we.utm_medium like '%paid%' then 'paid' else 'organic' end AS prefix,
+         we.referrer_domain,
+         we.url_query,
+         we.utm_medium,
+@@ -206,16 +206,16 @@ async function relationalQuery(
+       select
+         case
+           when referrer_domain = '' and url_query = '' then 'direct'
+-          when ${toPostgresLikeClause('url_query', PAID_AD_PARAMS)} then 'paidAds'
+-          when ${toPostgresLikeClause('utm_medium', ['referral', 'app', 'link'])} then 'referral'
+-          when utm_medium ilike '%affiliate%' then 'affiliate'
+-          when utm_medium ilike '%sms%' or utm_source ilike '%sms%' then 'sms'
+-          when ${toPostgresLikeClause('referrer_domain', SEARCH_DOMAINS)} or utm_medium ilike '%organic%' then concat(prefix, 'Search')
+-          when ${toPostgresLikeClause('referrer_domain', SOCIAL_DOMAINS)} then concat(prefix, 'Social')
+-          when ${toPostgresLikeClause('referrer_domain', EMAIL_DOMAINS)} or utm_medium ilike '%mail%' then 'email'
+-          when ${toPostgresLikeClause('referrer_domain', SHOPPING_DOMAINS)} or utm_medium ilike '%shop%' then concat(prefix, 'Shopping')
+-          when ${toPostgresLikeClause('referrer_domain', VIDEO_DOMAINS)} or utm_medium ilike '%video%' then concat(prefix, 'Video')
+-          when referrer_domain != regexp_replace(hostname, '^www.', '') and referrer_domain != '' then 'referral'
++          when ${toLikeClause('url_query', PAID_AD_PARAMS)} then 'paidAds'
++          when ${toLikeClause('utm_medium', ['referral', 'app', 'link'])} then 'referral'
++          when utm_medium like '%affiliate%' then 'affiliate'
++          when utm_medium like '%sms%' or utm_source like '%sms%' then 'sms'
++          when ${toLikeClause('referrer_domain', SEARCH_DOMAINS)} or utm_medium like '%organic%' then concat(prefix, 'Search')
++          when ${toLikeClause('referrer_domain', SOCIAL_DOMAINS)} then concat(prefix, 'Social')
++          when ${toLikeClause('referrer_domain', EMAIL_DOMAINS)} or utm_medium like '%mail%' then 'email'
++          when ${toLikeClause('referrer_domain', SHOPPING_DOMAINS)} or utm_medium like '%shop%' then concat(prefix, 'Shopping')
++          when ${toLikeClause('referrer_domain', VIDEO_DOMAINS)} or utm_medium like '%video%' then concat(prefix, 'Video')
++          when referrer_domain != iif(hostname like 'www.%', substr(hostname, 5), hostname) and referrer_domain != '' then 'referral'
+           else 'Unknown' end AS "name",
+         value
+       from revenue_prefix)
+@@ -446,6 +446,6 @@ function toClickHouseStringArray(arr: string[]): string {
+   return arr.map(p => `'${p.replace(/'/g, "\\'")}'`).join(', ');
+ }
+ 
+-function toPostgresLikeClause(column: string, arr: string[]) {
+-  return arr.map(val => `${column} ilike '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
++function toLikeClause(column: string, arr: string[]) {
++  return arr.map(val => `${column} like '%${val.replace(/'/g, "''")}%'`).join(' OR\n  ');
+ }
+diff --git a/src/queries/sql/reports/getRevenueSessions.ts b/src/queries/sql/reports/getRevenueSessions.ts
+index 3f30a79a..6d5993e3 100644
+--- a/src/queries/sql/reports/getRevenueSessions.ts
++++ b/src/queries/sql/reports/getRevenueSessions.ts
+@@ -15,7 +15,7 @@ export async function getRevenueSessions(
+ }
+ 
+ async function relationalQuery(websiteId: string, currency: string, filters: QueryFilters) {
+-  const { pagedRawQuery, parseFilters } = prisma;
++  const { pagedRawQuery, parseFilters, getIsoDateSQL } = prisma;
+   const { search } = filters;
+   const { filterQuery, dateQuery, cohortQuery, queryParams } = parseFilters({
+     ...filters,
+@@ -25,10 +25,10 @@ async function relationalQuery(websiteId: string, currency: string, filters: Que
+   });
+ 
+   const searchQuery = search
+-    ? `and (session.browser ilike {{search}}
+-           or session.os ilike {{search}}
+-           or session.device ilike {{search}}
+-           or session.city ilike {{search}})`
++    ? `and (session.browser like {{search}}
++           or session.os like {{search}}
++           or session.device like {{search}}
++           or session.city like {{search}})`
+     : '';
+ 
+   return pagedRawQuery(
+@@ -45,12 +45,12 @@ async function relationalQuery(websiteId: string, currency: string, filters: Que
+       session.country,
+       session.region,
+       session.city,
+-      min(website_event.created_at) as "firstAt",
+-      max(website_event.created_at) as "lastAt",
++      ${getIsoDateSQL('min(website_event.created_at)')} as "firstAt",
++      ${getIsoDateSQL('max(website_event.created_at)')} as "lastAt",
+       count(distinct website_event.visit_id) as "visits",
+       sum(case when website_event.event_type = 1 then 1 else 0 end) as "views",
+       sum(case when website_event.event_type = 2 then 1 else 0 end) as "events",
+-      max(website_event.created_at) as "createdAt"
++      ${getIsoDateSQL('max(website_event.created_at)')} as "createdAt"
+     from website_event
+     ${cohortQuery}
+     join session
+diff --git a/src/queries/sql/sessions/getSessionActivity.ts b/src/queries/sql/sessions/getSessionActivity.ts
+index 1ac7e6ff..63849ed3 100644
+--- a/src/queries/sql/sessions/getSessionActivity.ts
++++ b/src/queries/sql/sessions/getSessionActivity.ts
+@@ -15,13 +15,13 @@ export async function getSessionActivity(
+ }
+ 
+ async function relationalQuery(websiteId: string, sessionId: string, filters: QueryFilters) {
+-  const { rawQuery } = prisma;
++  const { rawQuery, getIsoDateSQL } = prisma;
+   const { startDate, endDate } = filters;
+ 
+   return rawQuery(
+     `
+     select
+-      created_at as "createdAt",
++      ${getIsoDateSQL('created_at')} as "createdAt",
+       url_path as "urlPath",
+       url_query as "urlQuery",
+       referrer_domain as "referrerDomain",
+diff --git a/src/queries/sql/sessions/getSessionData.ts b/src/queries/sql/sessions/getSessionData.ts
+index 8f1e4933..e941d7c2 100644
+--- a/src/queries/sql/sessions/getSessionData.ts
++++ b/src/queries/sql/sessions/getSessionData.ts
+@@ -12,7 +12,7 @@ export async function getSessionData(...args: [websiteId: string, sessionId: str
+ }
+ 
+ async function relationalQuery(websiteId: string, sessionId: string) {
+-  const { rawQuery } = prisma;
++  const { rawQuery, getIsoDateSQL } = prisma;
+ 
+   return rawQuery(
+     `
+@@ -23,8 +23,8 @@ async function relationalQuery(websiteId: string, sessionId: string) {
+         data_type as "dataType",
+         replace(string_value, '.0000', '') as "stringValue",
+         number_value as "numberValue",
+-        date_value as "dateValue",
+-        created_at as "createdAt"
++        ${getIsoDateSQL('date_value')} as "dateValue",
++        ${getIsoDateSQL('created_at')} as "createdAt"
+     from session_data
+     where website_id = {{websiteId::uuid}}
+       and session_id = {{sessionId::uuid}}
+diff --git a/src/queries/sql/sessions/getWebsiteSession.ts b/src/queries/sql/sessions/getWebsiteSession.ts
+index 3c160871..48626e24 100644
+--- a/src/queries/sql/sessions/getWebsiteSession.ts
++++ b/src/queries/sql/sessions/getWebsiteSession.ts
+@@ -12,7 +12,7 @@ export async function getWebsiteSession(...args: [websiteId: string, sessionId:
+ }
+ 
+ async function relationalQuery(websiteId: string, sessionId: string) {
+-  const { rawQuery, getTimestampDiffSQL } = prisma;
++  const { rawQuery, getTimestampDiffSQL, getIsoDateSQL } = prisma;
+ 
+   return rawQuery(
+     `
+@@ -27,8 +27,8 @@ async function relationalQuery(websiteId: string, sessionId: string) {
+       country,
+       region,
+       city,
+-      min(min_time) as "firstAt",
+-      max(max_time) as "lastAt",
++      ${getIsoDateSQL('min(min_time)')} as "firstAt",
++      ${getIsoDateSQL('max(max_time)')} as "lastAt",
+       count(distinct visit_id) as visits,
+       sum(views) as views,
+       sum(events) as events,
+diff --git a/src/queries/sql/sessions/getWebsiteSessions.ts b/src/queries/sql/sessions/getWebsiteSessions.ts
+index 8efea80d..c09bca8b 100644
+--- a/src/queries/sql/sessions/getWebsiteSessions.ts
++++ b/src/queries/sql/sessions/getWebsiteSessions.ts
+@@ -14,7 +14,7 @@ export async function getWebsiteSessions(...args: [websiteId: string, filters: Q
+ }
+ 
+ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+-  const { pagedRawQuery, parseFilters } = prisma;
++  const { pagedRawQuery, parseFilters, getIsoDateSQL } = prisma;
+   const { search } = filters;
+   const { filterQuery, dateQuery, cohortQuery, queryParams } = parseFilters({
+     ...filters,
+@@ -23,11 +23,11 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+   });
+ 
+   const searchQuery = search
+-    ? `and (distinct_id ilike {{search}}
+-           or city ilike {{search}}
+-           or browser ilike {{search}}
+-           or os ilike {{search}}
+-           or device ilike {{search}})`
++    ? `and (distinct_id like {{search}}
++           or city like {{search}}
++           or browser like {{search}}
++           or os like {{search}}
++           or device like {{search}})`
+     : '';
+ 
+   return pagedRawQuery(
+@@ -44,12 +44,12 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       session.country,
+       session.region,
+       session.city,
+-      min(website_event.created_at) as "firstAt",
+-      max(website_event.created_at) as "lastAt",
++      ${getIsoDateSQL('min(website_event.created_at)')} as "firstAt",
++      ${getIsoDateSQL('max(website_event.created_at)')} as "lastAt",
+       count(distinct website_event.visit_id) as "visits",
+       sum(case when website_event.event_type = 1 then 1 else 0 end) as "views",
+       sum(case when website_event.event_type = 2 then 1 else 0 end) as "events",
+-      max(website_event.created_at) as "createdAt"
++      ${getIsoDateSQL('max(website_event.created_at)')} as "createdAt"
+     from website_event 
+     ${cohortQuery}
+     join session on session.session_id = website_event.session_id

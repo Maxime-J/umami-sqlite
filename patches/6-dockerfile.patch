@@ -1,0 +1,84 @@
+diff --git a/Dockerfile b/Dockerfile
+index ac9fd8de..107fa166 100644
+--- a/Dockerfile
++++ b/Dockerfile
+@@ -1,12 +1,20 @@
+-ARG NODE_IMAGE_VERSION="22-alpine"
++ARG NODE_IMAGE_VERSION="26-alpine"
+ 
+ # Install dependencies only when needed
+ FROM node:${NODE_IMAGE_VERSION} AS deps
+ # Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
+-RUN apk add --no-cache libc6-compat
++RUN apk add --no-cache libc6-compat cmake make g++
+ WORKDIR /app
++COPY db ./db
+ COPY package.json pnpm-lock.yaml ./
+-RUN npm install -g pnpm
++RUN npm install -g pnpm@11.1.1
++
++RUN cat > pnpm-workspace.yaml << EOF
++strictDepBuilds: false
++patchedDependencies:
++  prisma-adapter-sqlite: db/sqlite/prisma-adapter-sqlite.patch
++EOF
++
+ RUN pnpm install --frozen-lockfile
+ 
+ # Rebuild the source code only when needed
+@@ -20,7 +28,7 @@ ARG BASE_PATH
+ 
+ ENV BASE_PATH=$BASE_PATH
+ ENV NEXT_TELEMETRY_DISABLED=1
+-ENV DATABASE_URL="postgresql://user:pass@localhost:5432/dummy"
++ENV DATABASE_URL="file:/db/dummy.db"
+ 
+ RUN npm run build-docker
+ 
+@@ -28,7 +36,7 @@ RUN npm run build-docker
+ FROM node:${NODE_IMAGE_VERSION} AS runner
+ WORKDIR /app
+ 
+-ARG PRISMA_VERSION="7.3.0"
++ARG PRISMA_VERSION="7.8.0"
+ ARG NODE_OPTIONS
+ 
+ ENV NODE_ENV=production
+@@ -39,14 +47,24 @@ RUN addgroup --system --gid 1001 nodejs
+ RUN adduser --system --uid 1001 nextjs
+ RUN set -x \
+     && apk add --no-cache curl \
+-    && npm install -g pnpm
++    && npm install -g pnpm@11.1.1
++
++RUN echo {} > package.json
++
++RUN cat > pnpm-workspace.yaml << EOF
++allowBuilds:
++  '@prisma/engines': true
++  prisma: false
++verifyDepsBeforeRun: false
++EOF
+ 
+ # Script dependencies
+-RUN pnpm --allow-build='@prisma/engines' add npm-run-all dotenv chalk semver \
++RUN pnpm add npm-run-all dotenv chalk semver \
+     prisma@${PRISMA_VERSION} \
+     @prisma/client@${PRISMA_VERSION} \
+-    @prisma/adapter-pg@${PRISMA_VERSION}
++    prisma-adapter-sqlite@1.0.0
+ 
++COPY --from=deps /app/db ./db
+ COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+ COPY --from=builder /app/prisma ./prisma
+ COPY --from=builder /app/prisma.config.ts ./prisma.config.ts
+@@ -58,6 +76,9 @@ COPY --from=builder /app/generated ./generated
+ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+ 
++RUN mkdir /db \
++    && chown nextjs:nodejs /db
++
+ USER nextjs
+ 
+ EXPOSE 3000

@@ -1,0 +1,16 @@
+diff --git a/src/queries/prisma/team.ts b/src/queries/prisma/team.ts
+index de938df3..42683b25 100644
+--- a/src/queries/prisma/team.ts
++++ b/src/queries/prisma/team.ts
+@@ -133,10 +133,7 @@ export async function updateTeam(teamId: string, data: Prisma.TeamUpdateInput):
+     where: {
+       id: teamId,
+     },
+-    data: {
+-      ...data,
+-      updatedAt: new Date(),
+-    },
++    data,
+   });
+ }
+ 

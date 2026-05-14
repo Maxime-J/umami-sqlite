@@ -1,0 +1,70 @@
+diff --git a/dist/index.d.mts b/dist/index.d.mts
+index 25b8199962d2f61947c998d774702e397c9a34bc..a9099cb1c6280b276a618e5635baf9f707ea2f61 100644
+--- a/dist/index.d.mts
++++ b/dist/index.d.mts
+@@ -20,6 +20,7 @@ declare type PrismaSqliteOptions = {
+ 
+ declare type SqliteInputParams = DatabaseSyncOptions & {
+     url: ':memory:' | (string & {});
++    extensions?: string[];
+ };
+ 
+ export { }
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 25b8199962d2f61947c998d774702e397c9a34bc..a9099cb1c6280b276a618e5635baf9f707ea2f61 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -20,6 +20,7 @@ declare type PrismaSqliteOptions = {
+ 
+ declare type SqliteInputParams = DatabaseSyncOptions & {
+     url: ':memory:' | (string & {});
++    extensions?: string[];
+ };
+ 
+ export { }
+diff --git a/dist/index.js b/dist/index.js
+index d85088d8284795b0d27db9ebd6dca5f73b8afeb7..132447834acf27bd9f6860486299c92e34acbce9 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -775,13 +775,17 @@ var PrismaSqliteAdapterFactory = class {
+   }
+ };
+ function createSqliteClient(input) {
+-  const { url, ...config } = input;
++  const { url, extensions, ...config } = input;
+   const dbPath = url.replace(/^file:/, "");
+   const db = new import_node_sqlite.DatabaseSync(dbPath, {
+     ...config,
++    allowExtension: true,
+     readBigInts: true,
+     returnArrays: true
+   });
++  if (Array.isArray(extensions)) {
++    for (const extension of extensions) db.loadExtension(extension);
++  }
+   return db;
+ }
+ // Annotate the CommonJS export names for ESM import in node:
+diff --git a/dist/index.mjs b/dist/index.mjs
+index 869632ab94b2e86cf3e22ad68963d6d05e8f1973..93719ccc485b91e45c68eb88db3c883e2ba59113 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -749,13 +749,17 @@ var PrismaSqliteAdapterFactory = class {
+   }
+ };
+ function createSqliteClient(input) {
+-  const { url, ...config } = input;
++  const { url, extensions, ...config } = input;
+   const dbPath = url.replace(/^file:/, "");
+   const db = new DatabaseSync(dbPath, {
+     ...config,
++    allowExtension: true,
+     readBigInts: true,
+     returnArrays: true
+   });
++  if (Array.isArray(extensions)) {
++    for (const extension of extensions) db.loadExtension(extension);
++  }
+   return db;
+ }
+ export {

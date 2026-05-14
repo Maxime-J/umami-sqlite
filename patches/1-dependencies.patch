@@ -1,0 +1,69 @@
+diff --git a/package.json b/package.json
+index 1d6fc31e..fb9abe37 100644
+--- a/package.json
++++ b/package.json
+@@ -38,6 +38,7 @@
+     "download-country-names": "node scripts/download-country-names.js",
+     "download-language-names": "node scripts/download-language-names.js",
+     "change-password": "node scripts/change-password.js",
++    "postinstall": "node db/sqlite/ext/build.js",
+     "postbuild": "node scripts/postbuild.js",
+     "test": "jest",
+     "cypress-open": "cypress open cypress run",
+@@ -56,9 +57,7 @@
+     "@dicebear/collection": "^9.4.2",
+     "@dicebear/core": "^9.4.2",
+     "@hello-pangea/dnd": "^17.0.0",
+-    "@prisma/adapter-pg": "^7.6.0",
+     "@prisma/client": "^7.6.0",
+-    "@prisma/extension-read-replicas": "^0.5.0",
+     "@react-spring/web": "^10.0.3",
+     "@svgr/cli": "^8.1.0",
+     "@tanstack/react-query": "^5.96.0",
+@@ -94,8 +93,8 @@
+     "node-fetch": "^3.2.8",
+     "npm-run-all": "^4.1.5",
+     "papaparse": "^5.5.3",
+-    "pg": "^8.20.0",
+     "prisma": "^7.6.0",
++    "prisma-adapter-sqlite": "1.0.0",
+     "pure-rand": "^7.0.1",
+     "react": "^19.2.5",
+     "react-dom": "^19.2.5",
+@@ -154,5 +153,9 @@
+     "tsup": "^8.5.0",
+     "tsx": "^4.19.0",
+     "typescript": "^5.9.3"
+-  }
++  },
++  "engines": {
++    "node": ">=26.1.0"
++  },
++  "packageManager": "pnpm@11.1.1"
+ }
+diff --git a/pnpm-workspace.yaml b/pnpm-workspace.yaml
+index 5e236fb7..783b83bf 100644
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -1,10 +1,13 @@
+ packages:
+   - '**'
+-ignoredBuiltDependencies:
+-  - cypress
+-  - esbuild
+-  - sharp
+-onlyBuiltDependencies:
+-  - '@prisma/client'
+-  - '@prisma/engines'
+-  - prisma
++allowBuilds:
++  '@parcel/watcher': false
++  '@prisma/client': true
++  '@prisma/engines': true
++  '@swc/core': false
++  cypress: false
++  esbuild: false
++  prisma: true
++  sharp: false
++patchedDependencies:
++  prisma-adapter-sqlite: db/sqlite/prisma-adapter-sqlite.patch

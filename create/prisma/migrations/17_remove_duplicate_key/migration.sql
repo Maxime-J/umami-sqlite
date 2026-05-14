@@ -1,0 +1,1 @@
+-- No duplicate to remove, in each table rowid is the primary key and unique index is used for main id.

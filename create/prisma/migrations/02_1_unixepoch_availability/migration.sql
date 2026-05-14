@@ -1,0 +1,15 @@
+-- Update defaults and force schema_version incrementation with an immediatly dropped new table
+BEGIN TRANSACTION;
+PRAGMA writable_schema=ON;
+UPDATE sqlite_schema SET sql='CREATE TABLE `user` ( `user_id` TEXT PRIMARY KEY NOT NULL, `username` TEXT NOT NULL, `password` TEXT NOT NULL, `role` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL, `deleted_at` INTEGER NULL )' WHERE type='table' AND name='user';
+UPDATE sqlite_schema SET sql='CREATE TABLE `session` ( `session_id` TEXT PRIMARY KEY NOT NULL, `website_id` TEXT NOT NULL, `hostname` TEXT NULL, `browser` TEXT NULL, `os` TEXT NULL, `device` TEXT NULL, `screen` TEXT NULL, `language` TEXT NULL, `country` TEXT NULL, `subdivision1` TEXT NULL, `subdivision2` TEXT NULL, `city` TEXT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()) )' WHERE type='table' AND name='session';
+UPDATE sqlite_schema SET sql='CREATE TABLE `website` ( `website_id` TEXT PRIMARY KEY NOT NULL, `name` TEXT NOT NULL, `domain` TEXT NULL, `share_id` TEXT NULL, `reset_at` INTEGER NULL, `user_id` TEXT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL, `deleted_at` INTEGER NULL )' WHERE type='table' AND name='website';
+UPDATE sqlite_schema SET sql='CREATE TABLE `website_event` ( `event_id` TEXT PRIMARY KEY NOT NULL, `website_id` TEXT NOT NULL, `session_id` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `url_path` TEXT NOT NULL, `url_query` TEXT NULL, `referrer_path` TEXT NULL, `referrer_query` TEXT NULL, `referrer_domain` TEXT NULL, `page_title` TEXT NULL, `event_type` INTEGER UNSIGNED NOT NULL DEFAULT 1, `event_name` TEXT NULL )' WHERE type='table' AND name='website_event';
+UPDATE sqlite_schema SET sql='CREATE TABLE `event_data` ( `event_id` TEXT PRIMARY KEY NOT NULL, `website_event_id` TEXT NOT NULL, `website_id` TEXT NOT NULL, `event_key` TEXT NOT NULL, `event_string_value` TEXT NULL, `event_numeric_value` NUMERIC NULL, `event_date_value` INTEGER NULL, `event_data_type` INTEGER UNSIGNED NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()) )' WHERE type='table' AND name='event_data';
+UPDATE sqlite_schema SET sql='CREATE TABLE `team` ( `team_id` TEXT PRIMARY KEY NOT NULL, `name` TEXT NOT NULL, `access_code` TEXT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL )' WHERE type='table' AND name='team';
+UPDATE sqlite_schema SET sql='CREATE TABLE `team_user` ( `team_user_id` TEXT PRIMARY KEY NOT NULL, `team_id` TEXT NOT NULL, `user_id` TEXT NOT NULL, `role` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()), `updated_at` INTEGER NULL )' WHERE type='table' AND name='team_user';
+UPDATE sqlite_schema SET sql='CREATE TABLE `team_website` ( `team_website_id` TEXT PRIMARY KEY NOT NULL, `team_id` TEXT NOT NULL, `website_id` TEXT NOT NULL, `created_at` INTEGER NULL DEFAULT (unixepoch()) )' WHERE type='table' AND name='team_website';
+CREATE TABLE update_schema_version ( version INTEGER );
+DROP TABLE update_schema_version;
+PRAGMA writable_schema=OFF;
+COMMIT;

@@ -13,34 +13,35 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Prepare
-        run: |
-          echo 'work' > .gitignore
-          mkdir work
+        uses: actions/checkout@v6
+        with:
+          path: repository
 
       - name: Get Umami version
-        run: |
-          PATCH_FILE=$(ls *.patch)
-          echo "UMAMI_VERSION=v${PATCH_FILE%.*}" >> $GITHUB_ENV
+        working-directory: repository
+        run: echo "UMAMI_VERSION=v${cat VERSION}" >> $GITHUB_ENV
 
       - name: Download Umami
         run: |
-          cd work
           wget https://github.com/umami-software/umami/archive/refs/tags/$UMAMI_VERSION.zip
           unzip -q $UMAMI_VERSION.zip
 
-      - name: Apply patch and zip
+      - name: Prepare and zip
         run: |
-          cd work
           UMAMI_FOLDER=$(ls -d umami-*)
           cd $UMAMI_FOLDER
-          patch -p1 < ../../*.patch
+          rm -rf ./db ./prisma
+          rsync -a ../repository/create ./
+          cp ../repository/examples/docker-compose.yml ./
+          git apply ../repository/patches/*.patch
           cd ..
           zip -q -r $RELEASE_FILE $UMAMI_FOLDER
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create $UMAMI_VERSION work/$RELEASE_FILE --generate-notes --draft
+        run: |
+          gh release create $UMAMI_VERSION $RELEASE_FILE \
+            --notes "https://github.com/umami-software/umami/releases/tag/$UMAMI_VERSION" \
+            --draft \
+            --repo $GITHUB_REPOSITORY

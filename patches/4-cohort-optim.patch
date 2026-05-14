@@ -1,0 +1,879 @@
+diff --git a/src/lib/prisma.ts b/src/lib/prisma.ts
+index 88167eaa..71968591 100644
+--- a/src/lib/prisma.ts
++++ b/src/lib/prisma.ts
+@@ -164,19 +164,21 @@ function getCohortQuery(filters: QueryFilters = {}) {
+   const cohortMatch = (filters as any).cohort_match;
+   const cohortActionName = (filters as any).cohort_actionName;
+ 
+-  const filterQuery = getFilterQuery(filters, { isCohort: true, cohortMatch, cohortActionName });
+-
+-  return `join
+-    (select distinct website_event.session_id
+-    from website_event
+-    join session on session.session_id = website_event.session_id
+-      and session.website_id = website_event.website_id
+-    where website_event.website_id = {{websiteId}}
+-      and website_event.created_at between {{cohort_startDate}} and {{cohort_endDate}}
++  const filterQuery = getFilterQuery(filters, { isCohort: true, cohortMatch, cohortActionName })
++    .replaceAll('website_event.', 'we_cohort.')
++    .replaceAll('session.', 's_cohort.');
++
++  return `and exists (
++    select 1
++    from website_event we_cohort
++    join session s_cohort on s_cohort.session_id = we_cohort.session_id
++      and s_cohort.website_id = we_cohort.website_id
++    where we_cohort.session_id = website_event.session_id
++      and we_cohort.website_id = {{websiteId}}
++      and we_cohort.created_at between {{cohort_startDate}} and {{cohort_endDate}}
+       ${filterQuery}
+-    ) cohort
+-    on cohort.session_id = website_event.session_id
+-    `;
++  )
++  `;
+ }
+ 
+ function getExcludeBounceQuery(filters: Record<string, any>) {
+diff --git a/src/queries/sql/events/getEventData.ts b/src/queries/sql/events/getEventData.ts
+index 21cc1820..7074e297 100644
+--- a/src/queries/sql/events/getEventData.ts
++++ b/src/queries/sql/events/getEventData.ts
+@@ -31,11 +31,11 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+     join event_data on event_data.website_event_id = website_event.event_id
+       and event_data.website_id = {{websiteId::uuid}}
+       and event_data.created_at between {{startDate}} and {{endDate}}
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+     group by website_event.event_id
+   `;
+ 
+diff --git a/src/queries/sql/events/getEventDataEvents.ts b/src/queries/sql/events/getEventDataEvents.ts
+index f415e629..e8d725e8 100644
+--- a/src/queries/sql/events/getEventDataEvents.ts
++++ b/src/queries/sql/events/getEventDataEvents.ts
+@@ -42,11 +42,11 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       from event_data
+       inner join website_event
+         on website_event.event_id = event_data.website_event_id
+-      ${cohortQuery}
+       ${joinSessionQuery}
+       where event_data.website_id = {{websiteId::uuid}}
+         and event_data.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+       group by website_event.event_name, event_data.data_key, event_data.data_type, event_data.string_value
+       order by 1 asc, 2 asc, 3 asc, 5 desc
+       `,
+@@ -65,11 +65,11 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+     from event_data
+     inner join website_event
+       on website_event.event_id = event_data.website_event_id
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where event_data.website_id = {{websiteId::uuid}}
+       and event_data.created_at between {{startDate}} and {{endDate}}
+     ${filterQuery}
++    ${cohortQuery}
+     limit 500
+     `,
+     queryParams,
+diff --git a/src/queries/sql/events/getEventDataFields.ts b/src/queries/sql/events/getEventDataFields.ts
+index 70945492..0c1a1393 100644
+--- a/src/queries/sql/events/getEventDataFields.ts
++++ b/src/queries/sql/events/getEventDataFields.ts
+@@ -34,11 +34,11 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+     join website_event on website_event.event_id = event_data.website_event_id
+       and website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where event_data.website_id = {{websiteId::uuid}}
+       and event_data.created_at between {{startDate}} and {{endDate}}
+     ${filterQuery}
++    ${cohortQuery}
+     group by data_key, data_type, value
+     order by 2 desc
+     limit 100
+diff --git a/src/queries/sql/events/getEventDataProperties.ts b/src/queries/sql/events/getEventDataProperties.ts
+index 82d0b6b6..79934da6 100644
+--- a/src/queries/sql/events/getEventDataProperties.ts
++++ b/src/queries/sql/events/getEventDataProperties.ts
+@@ -36,11 +36,11 @@ async function relationalQuery(
+     join website_event on website_event.event_id = event_data.website_event_id
+       and website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where event_data.website_id = {{websiteId::uuid}}
+       and event_data.created_at between {{startDate}} and {{endDate}}
+     ${filterQuery}
++    ${cohortQuery}
+     group by website_event.event_name, event_data.data_key
+     order by 3 desc
+     limit 500
+diff --git a/src/queries/sql/events/getEventDataStats.ts b/src/queries/sql/events/getEventDataStats.ts
+index 9d178f67..e6b52bf2 100644
+--- a/src/queries/sql/events/getEventDataStats.ts
++++ b/src/queries/sql/events/getEventDataStats.ts
+@@ -40,11 +40,11 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       join website_event on website_event.event_id = event_data.website_event_id
+         and website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+-      ${cohortQuery}
+       ${joinSessionQuery}
+       where event_data.website_id = {{websiteId::uuid}}
+         and event_data.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+       group by website_event_id, data_key
+       ) as t
+     `,
+diff --git a/src/queries/sql/events/getEventDataValues.ts b/src/queries/sql/events/getEventDataValues.ts
+index f644934e..eda1516b 100644
+--- a/src/queries/sql/events/getEventDataValues.ts
++++ b/src/queries/sql/events/getEventDataValues.ts
+@@ -42,12 +42,12 @@ async function relationalQuery(
+     join website_event on website_event.event_id = event_data.website_event_id
+       and website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where event_data.website_id = {{websiteId::uuid}}
+       and event_data.created_at between {{startDate}} and {{endDate}}
+       and event_data.data_key = {{propertyName}}
+     ${filterQuery}
++    ${cohortQuery}
+     group by value
+     order by 2 desc
+     limit 100
+diff --git a/src/queries/sql/events/getEventExpandedMetrics.ts b/src/queries/sql/events/getEventExpandedMetrics.ts
+index 86bda850..5da3927a 100644
+--- a/src/queries/sql/events/getEventExpandedMetrics.ts
++++ b/src/queries/sql/events/getEventExpandedMetrics.ts
+@@ -65,11 +65,11 @@ async function relationalQuery(
+         min(website_event.created_at) as "min_time",
+         max(website_event.created_at) as "max_time"
+       from website_event
+-      ${cohortQuery}
+       ${joinSessionQuery}  
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+         ${filterQuery}
++        ${cohortQuery}
+       group by name, website_event.session_id, website_event.visit_id
+     ) as t
+     where name != ''
+diff --git a/src/queries/sql/events/getEventMetrics.ts b/src/queries/sql/events/getEventMetrics.ts
+index 500c67e9..4ab2719c 100644
+--- a/src/queries/sql/events/getEventMetrics.ts
++++ b/src/queries/sql/events/getEventMetrics.ts
+@@ -49,11 +49,11 @@ async function relationalQuery(
+     select ${column} x,
+       count(*) as y
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+     group by 1
+     order by 2 desc
+     limit ${limit}
+diff --git a/src/queries/sql/events/getEventStats.ts b/src/queries/sql/events/getEventStats.ts
+index 9c1f5c12..d8b86b59 100644
+--- a/src/queries/sql/events/getEventStats.ts
++++ b/src/queries/sql/events/getEventStats.ts
+@@ -57,13 +57,13 @@ async function relationalQuery(
+       ${getDateSQL('website_event.created_at', unit, timezone)} t,
+       count(*) y
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       and website_event.event_type = 2
+       ${filterQuery}
+       ${limitQuery}
++      ${cohortQuery}
+     group by 1, 2
+     order by 2
+     `,
+diff --git a/src/queries/sql/events/getWebsiteEventStats.ts b/src/queries/sql/events/getWebsiteEventStats.ts
+index c4ed7a69..0cd4218b 100644
+--- a/src/queries/sql/events/getWebsiteEventStats.ts
++++ b/src/queries/sql/events/getWebsiteEventStats.ts
+@@ -45,12 +45,12 @@ async function relationalQuery(
+         website_event.event_name,
+         count(*) as "c"
+       from website_event
+-      ${cohortQuery}
+       ${joinSessionQuery}  
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+         and website_event.event_type = 2
+         ${filterQuery}
++        ${cohortQuery}
+       group by 1, 2, 3
+     ) as t
+     `,
+diff --git a/src/queries/sql/events/getWebsiteEvents.ts b/src/queries/sql/events/getWebsiteEvents.ts
+index 15c35834..81f567f5 100644
+--- a/src/queries/sql/events/getWebsiteEvents.ts
++++ b/src/queries/sql/events/getWebsiteEvents.ts
+@@ -51,13 +51,13 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+                    where website_id = {{websiteId::uuid}}
+                       and created_at between {{startDate}} and {{endDate}}) AS "hasData"
+     from website_event
+-    ${cohortQuery}
+     join session on session.session_id = website_event.session_id 
+       and session.website_id = website_event.website_id
+     where website_event.website_id = {{websiteId::uuid}}
+     ${dateQuery}
+     ${filterQuery}
+     ${searchQuery}
++    ${cohortQuery}
+     order by website_event.created_at desc
+     `,
+     queryParams,
+diff --git a/src/queries/sql/getChannelExpandedMetrics.ts b/src/queries/sql/getChannelExpandedMetrics.ts
+index 5c1dac02..3cbf5961 100644
+--- a/src/queries/sql/getChannelExpandedMetrics.ts
++++ b/src/queries/sql/getChannelExpandedMetrics.ts
+@@ -65,13 +65,13 @@ async function relationalQuery(
+             min(website_event.created_at) min_time,
+             max(website_event.created_at) max_time
+         from website_event
+-        ${cohortQuery}
+         ${excludeBounceQuery}
+         ${joinSessionQuery}
+         where website_event.website_id = {{websiteId::uuid}}
+           and website_event.event_type NOT IN (2, 5)
+           ${dateQuery}
+           ${filterQuery}
++          ${cohortQuery}
+         group by prefix, 
+             website_event.referrer_domain,
+             website_event.url_query,
+diff --git a/src/queries/sql/getChannelMetrics.ts b/src/queries/sql/getChannelMetrics.ts
+index 56ef62db..2fbc1413 100644
+--- a/src/queries/sql/getChannelMetrics.ts
++++ b/src/queries/sql/getChannelMetrics.ts
+@@ -42,13 +42,13 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+           website_event.session_id,
+           website_event.hostname
+       from website_event
+-      ${cohortQuery}
+       ${excludeBounceQuery}
+       ${joinSessionQuery}
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.event_type NOT IN (2, 5)
+         ${dateQuery}
+-        ${filterQuery}),
++        ${filterQuery}
++        ${cohortQuery}),
+ 
+     channels as (
+       select case
+diff --git a/src/queries/sql/getRealtimeActivity.ts b/src/queries/sql/getRealtimeActivity.ts
+index a265e99a..7d2c69d7 100644
+--- a/src/queries/sql/getRealtimeActivity.ts
++++ b/src/queries/sql/getRealtimeActivity.ts
+@@ -33,13 +33,13 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+         website_event.referrer_domain as "referrerDomain",
+         website_event.hostname
+     from website_event
+-    ${cohortQuery}
+     inner join session
+       on session.session_id = website_event.session_id
+         and session.website_id = website_event.website_id
+     where website_event.website_id = {{websiteId::uuid}}
+     ${filterQuery}
+     ${dateQuery}
++    ${cohortQuery}
+     order by website_event.created_at desc
+     limit 100
+     `,
+diff --git a/src/queries/sql/getWebsiteStats.ts b/src/queries/sql/getWebsiteStats.ts
+index dd998b48..9792c3ec 100644
+--- a/src/queries/sql/getWebsiteStats.ts
++++ b/src/queries/sql/getWebsiteStats.ts
+@@ -53,13 +53,13 @@ async function relationalQuery(
+         min(website_event.created_at) as "min_time",
+         max(website_event.created_at) as "max_time"
+       from website_event
+-      ${cohortQuery}
+       ${excludeBounceQuery}
+       ${joinSessionQuery}  
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+         and website_event.event_type NOT IN (2, 5)
+         ${filterQuery}
++        ${cohortQuery}
+       group by 1, 2
+      
+     ) as t
+diff --git a/src/queries/sql/getWeeklyTraffic.ts b/src/queries/sql/getWeeklyTraffic.ts
+index bd439841..685e4081 100644
+--- a/src/queries/sql/getWeeklyTraffic.ts
++++ b/src/queries/sql/getWeeklyTraffic.ts
+@@ -28,13 +28,13 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       ${getDateWeeklySQL('website_event.created_at', timezone)} as time,
+       count(distinct website_event.session_id) as value
+     from website_event
+-    ${cohortQuery}
+     ${excludeBounceQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       and website_event.event_type NOT IN (2, 5)
+       ${filterQuery}
++      ${cohortQuery}
+     group by time
+     order by 1
+     `,
+diff --git a/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts b/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts
+index 78299fe3..6089a55a 100644
+--- a/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts
++++ b/src/queries/sql/pageviews/getPageviewExpandedMetrics.ts
+@@ -94,7 +94,6 @@ async function relationalQuery(
+         min(website_event.created_at) as "min_time",
+         max(website_event.created_at) as "max_time"
+       from website_event
+-      ${cohortQuery}
+       ${excludeBounceQuery}
+       ${joinSessionQuery} 
+       ${entryExitQuery} 
+@@ -103,6 +102,7 @@ async function relationalQuery(
+       and website_event.event_type NOT IN (2, 5)
+         ${excludeDomain}
+         ${filterQuery}
++        ${cohortQuery}
+       group by ${column}, website_event.session_id, website_event.visit_id
+     ) as t
+     where name != ''
+diff --git a/src/queries/sql/pageviews/getPageviewMetrics.ts b/src/queries/sql/pageviews/getPageviewMetrics.ts
+index dca09c4c..20582a50 100644
+--- a/src/queries/sql/pageviews/getPageviewMetrics.ts
++++ b/src/queries/sql/pageviews/getPageviewMetrics.ts
+@@ -82,7 +82,6 @@ async function relationalQuery(
+     select ${column} x,
+       count(distinct website_event.session_id) as y
+     from website_event
+-    ${cohortQuery}
+     ${excludeBounceQuery}
+     ${joinSessionQuery}
+     ${entryExitQuery}
+@@ -92,6 +91,7 @@ async function relationalQuery(
+       and ${column} != ''
+       ${excludeDomain}
+       ${filterQuery}
++      ${cohortQuery}
+     group by 1
+     order by 2 desc
+     limit ${limit}
+diff --git a/src/queries/sql/pageviews/getPageviewStats.ts b/src/queries/sql/pageviews/getPageviewStats.ts
+index 86d438b3..32ca4175 100644
+--- a/src/queries/sql/pageviews/getPageviewStats.ts
++++ b/src/queries/sql/pageviews/getPageviewStats.ts
+@@ -28,13 +28,13 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       ${getDateSQL('website_event.created_at', unit, timezone)} x,
+       count(*) y
+     from website_event
+-    ${cohortQuery}
+     ${excludeBounceQuery}
+     ${joinSessionQuery}  
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       and website_event.event_type NOT IN (2, 5)
+       ${filterQuery}
++      ${cohortQuery}
+     group by 1
+     order by 1
+     `,
+diff --git a/src/queries/sql/performance/getPerformanceStats.ts b/src/queries/sql/performance/getPerformanceStats.ts
+index f476037d..a52b8241 100644
+--- a/src/queries/sql/performance/getPerformanceStats.ts
++++ b/src/queries/sql/performance/getPerformanceStats.ts
+@@ -39,12 +39,12 @@ async function relationalQuery(
+       percentile_cont(ttfb, 0.75) as ttfb,
+       count(*) as count
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.event_type = 5
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+     `,
+     queryParams,
+   );
+diff --git a/src/queries/sql/replays/getSessionReplays.ts b/src/queries/sql/replays/getSessionReplays.ts
+index e9fbe574..7cefa23d 100644
+--- a/src/queries/sql/replays/getSessionReplays.ts
++++ b/src/queries/sql/replays/getSessionReplays.ts
+@@ -27,10 +27,10 @@ async function relationalQuery(websiteId: string, filters: QueryFilters, session
+     filterQuery || cohortQuery
+       ? `join (select distinct website_event.website_id, website_event.session_id, website_event.visit_id
+                from website_event
+-               ${cohortQuery}
+                where website_event.website_id = {{websiteId::uuid}}
+                   and website_event.created_at between {{startDate}} and {{endDate}}
+-                  ${filterQuery}) website_event
++                  ${filterQuery}
++                  ${cohortQuery}) website_event
+         on website_event.website_id = sr.website_id
+           and website_event.session_id = sr.session_id
+           and website_event.visit_id = sr.visit_id`
+diff --git a/src/queries/sql/reports/getAttribution.ts b/src/queries/sql/reports/getAttribution.ts
+index 848a3fd8..a1d4109d 100644
+--- a/src/queries/sql/reports/getAttribution.ts
++++ b/src/queries/sql/reports/getAttribution.ts
+@@ -70,12 +70,12 @@ async function relationalQuery(
+             website_event.session_id,
+             max(website_event.created_at) max_dt
+         from website_event
+-        ${cohortQuery}
+         ${joinSessionQuery}
+         where website_event.website_id = {{websiteId::uuid}}
+           and website_event.created_at between {{startDate}} and {{endDate}}
+           and website_event.${column} = {{step}}
+           ${filterQuery}
++          ${cohortQuery}
+         group by 1),`;
+ 
+   function getModelQuery(model: string) {
+@@ -209,11 +209,11 @@ async function relationalQuery(
+         count(distinct website_event.visit_id) as "visits"
+     from website_event
+     ${joinSessionQuery}
+-    ${cohortQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+         and website_event.${column} = {{step}}
+         ${filterQuery}
++        ${cohortQuery}
+     `,
+     queryParams,
+   ).then(result => result?.[0]);
+diff --git a/src/queries/sql/reports/getBreakdown.ts b/src/queries/sql/reports/getBreakdown.ts
+index 3d1e92a4..795a6839 100644
+--- a/src/queries/sql/reports/getBreakdown.ts
++++ b/src/queries/sql/reports/getBreakdown.ts
+@@ -62,11 +62,11 @@ async function relationalQuery(
+         min(website_event.created_at) as "min_time",
+         max(website_event.created_at) as "max_time"
+       from website_event
+-      ${cohortQuery}  
+       ${joinSessionQuery}
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+         ${filterQuery}
++        ${cohortQuery}
+       group by ${parseFieldsByName(fields)}, 
+         website_event.session_id, website_event.visit_id
+     ) as t
+diff --git a/src/queries/sql/reports/getFunnel.ts b/src/queries/sql/reports/getFunnel.ts
+index 39862a14..64c443ba 100644
+--- a/src/queries/sql/reports/getFunnel.ts
++++ b/src/queries/sql/reports/getFunnel.ts
+@@ -133,13 +133,13 @@ async function relationalQuery(
+           WITH level1 AS (
+             select distinct website_event.session_id, website_event.created_at
+             from website_event
+-            ${cohortQuery}
+             ${joinSessionQuery}
+             where website_event.website_id = {{websiteId::uuid}}
+               and website_event.created_at between {{startDate}} and {{endDate}}
+               and ${column} ${operator} {{${i}}}
+               ${filterQuery}
+               ${existsClause}
++              ${cohortQuery}
+           )`;
+         } else {
+           pv.levelQuery += `
+diff --git a/src/queries/sql/reports/getGoal.ts b/src/queries/sql/reports/getGoal.ts
+index e6f42551..0687ceec 100644
+--- a/src/queries/sql/reports/getGoal.ts
++++ b/src/queries/sql/reports/getGoal.ts
+@@ -58,19 +58,19 @@ async function relationalQuery(
+     (
+       select count(distinct website_event.session_id)
+       from website_event
+-      ${cohortQuery}
+       ${joinSessionQuery}
+       where website_event.website_id = {{websiteId::uuid}}
+       ${dateQuery}
+       ${excludeEventTypeFilterQuery}
++      ${cohortQuery}
+     ) as total
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and ${column} ${operator} {{value}}
+       ${dateQuery}
+       ${filterQuery}
++      ${cohortQuery}
+     `,
+     queryParams,
+   ).then(results => results?.[0]);
+diff --git a/src/queries/sql/reports/getJourney.ts b/src/queries/sql/reports/getJourney.ts
+index d12d371b..9f68839e 100644
+--- a/src/queries/sql/reports/getJourney.ts
++++ b/src/queries/sql/reports/getJourney.ts
+@@ -122,11 +122,11 @@ async function relationalQuery(
+           coalesce(nullIf(website_event.event_name, ''), website_event.url_path) "event",
+           row_number() OVER (PARTITION BY visit_id ORDER BY website_event.created_at) AS event_number
+       from website_event
+-      ${cohortQuery}
+       ${joinSessionQuery}
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+-        ${filterQuery}),
++        ${filterQuery}
++        ${cohortQuery}),
+     ${sequenceQuery}
+     select *
+     from sequences
+diff --git a/src/queries/sql/reports/getPerformance.ts b/src/queries/sql/reports/getPerformance.ts
+index 0a6431a0..ad464be4 100644
+--- a/src/queries/sql/reports/getPerformance.ts
++++ b/src/queries/sql/reports/getPerformance.ts
+@@ -52,12 +52,12 @@ async function relationalQuery(
+       percentile_cont(${metric}, 0.75) as p75,
+       percentile_cont(${metric}, 0.95) as p95
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.event_type = 5
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+     group by t
+     order by t
+     `,
+@@ -84,12 +84,12 @@ async function relationalQuery(
+       percentile_cont(ttfb, 0.95) as ttfb_p95,
+       count(*) as count
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.event_type = 5
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+     `,
+     { ...queryParams, startDate, endDate },
+   ).then(result => result?.[0]);
+diff --git a/src/queries/sql/reports/getPerformanceMetrics.ts b/src/queries/sql/reports/getPerformanceMetrics.ts
+index 8015d8a9..6d9c8860 100644
+--- a/src/queries/sql/reports/getPerformanceMetrics.ts
++++ b/src/queries/sql/reports/getPerformanceMetrics.ts
+@@ -51,12 +51,12 @@ async function relationalQuery(
+       percentile_cont(${metric}, 0.95) as p95,
+       count(*) as count
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.event_type = 5
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+     group by ${column}
+     order by p75 desc
+     ${limit ? `limit ${limit}` : ''}
+diff --git a/src/queries/sql/reports/getRetention.ts b/src/queries/sql/reports/getRetention.ts
+index 6e1c60db..827cf97d 100644
+--- a/src/queries/sql/reports/getRetention.ts
++++ b/src/queries/sql/reports/getRetention.ts
+@@ -50,11 +50,11 @@ async function relationalQuery(
+         min(${getDateSQL('website_event.created_at', unit, timezone)}) as cohort_date,
+         website_event.session_id
+       from website_event
+-      ${cohortQuery}
+       ${joinSessionQuery}
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+         ${filterQuery}
++        ${cohortQuery}
+       group by website_event.session_id
+     ),
+     user_activities AS (
+diff --git a/src/queries/sql/reports/getRevenue.ts b/src/queries/sql/reports/getRevenue.ts
+index 183861e1..aedb4c18 100644
+--- a/src/queries/sql/reports/getRevenue.ts
++++ b/src/queries/sql/reports/getRevenue.ts
+@@ -57,12 +57,12 @@ async function relationalQuery(
+       count(revenue.event_id) count
+     from revenue
+     ${joinQuery}
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where revenue.website_id = {{websiteId::uuid}}
+       and revenue.created_at between {{startDate}} and {{endDate}}
+       and upper(revenue.currency) = {{currency}}
+       ${filterQuery}
++      ${cohortQuery}
+     group by  x, t
+     order by t
+     `,
+diff --git a/src/queries/sql/reports/getRevenueMetrics.ts b/src/queries/sql/reports/getRevenueMetrics.ts
+index f37ef269..dfa2094b 100644
+--- a/src/queries/sql/reports/getRevenueMetrics.ts
++++ b/src/queries/sql/reports/getRevenueMetrics.ts
+@@ -65,11 +65,11 @@ async function relationalQuery(
+     join session
+       on session.website_id = revenue.website_id
+         and session.session_id = revenue.session_id
+-    ${cohortQuery}
+     where revenue.website_id = {{websiteId::uuid}}
+       and revenue.created_at between {{startDate}} and {{endDate}}
+       and upper(revenue.currency) = {{currency}}
+       ${filterQuery}
++      ${cohortQuery}
+     group by session.country
+     order by value desc
+     `,
+@@ -87,11 +87,11 @@ async function relationalQuery(
+     join session
+       on session.website_id = revenue.website_id
+         and session.session_id = revenue.session_id
+-    ${cohortQuery}
+     where revenue.website_id = {{websiteId::uuid}}
+       and revenue.created_at between {{startDate}} and {{endDate}}
+       and upper(revenue.currency) = {{currency}}
+       ${filterQuery}
++      ${cohortQuery}
+     group by session.country, session.region
+     order by value desc
+     `,
+@@ -107,12 +107,12 @@ async function relationalQuery(
+         sum(revenue.revenue) as "value"
+       from revenue
+       ${joinQuery}
+-      ${cohortQuery}
+       ${joinSessionQuery}
+       where revenue.website_id = {{websiteId::uuid}}
+         and revenue.created_at between {{startDate}} and {{endDate}}
+         and upper(revenue.currency) = {{currency}}
+         ${filterQuery}
++        ${cohortQuery}
+       group by revenue.website_id, revenue.session_id),
+ 
+     revenue_data AS (
+@@ -157,12 +157,12 @@ async function relationalQuery(
+         sum(revenue.revenue) as "value"
+       from revenue
+       ${joinQuery}
+-      ${cohortQuery}
+       ${joinSessionQuery}
+       where revenue.website_id = {{websiteId::uuid}}
+         and revenue.created_at between {{startDate}} and {{endDate}}
+         and upper(revenue.currency) = {{currency}}
+         ${filterQuery}
++        ${cohortQuery}
+       group by revenue.website_id, revenue.session_id),
+ 
+     revenue_data AS (
+diff --git a/src/queries/sql/reports/getRevenueSessions.ts b/src/queries/sql/reports/getRevenueSessions.ts
+index 6d5993e3..5ecd2270 100644
+--- a/src/queries/sql/reports/getRevenueSessions.ts
++++ b/src/queries/sql/reports/getRevenueSessions.ts
+@@ -52,7 +52,6 @@ async function relationalQuery(websiteId: string, currency: string, filters: Que
+       sum(case when website_event.event_type = 2 then 1 else 0 end) as "events",
+       ${getIsoDateSQL('max(website_event.created_at)')} as "createdAt"
+     from website_event
+-    ${cohortQuery}
+     join session
+       on session.session_id = website_event.session_id
+       and session.website_id = website_event.website_id
+@@ -67,6 +66,7 @@ async function relationalQuery(websiteId: string, currency: string, filters: Que
+     ${dateQuery}
+     ${filterQuery}
+     ${searchQuery}
++    ${cohortQuery}
+     group by
+       session.session_id,
+       session.website_id,
+diff --git a/src/queries/sql/reports/getRevenueStats.ts b/src/queries/sql/reports/getRevenueStats.ts
+index 11616613..af2961c9 100644
+--- a/src/queries/sql/reports/getRevenueStats.ts
++++ b/src/queries/sql/reports/getRevenueStats.ts
+@@ -60,12 +60,12 @@ async function relationalQuery(
+          and created_at between {{startDate}} and {{endDate}}) as total_sessions
+     from revenue
+     ${joinQuery}
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where revenue.website_id = {{websiteId::uuid}}
+       and revenue.created_at between {{startDate}} and {{endDate}}
+       and upper(revenue.currency) = {{currency}}
+       ${filterQuery}
++      ${cohortQuery}
+   `,
+     queryParams,
+   ).then(result => result?.[0]);
+diff --git a/src/queries/sql/reports/getUTM.ts b/src/queries/sql/reports/getUTM.ts
+index f470e954..d106fc6c 100644
+--- a/src/queries/sql/reports/getUTM.ts
++++ b/src/queries/sql/reports/getUTM.ts
+@@ -39,12 +39,12 @@ async function relationalQuery(
+     `
+     select website_event.${column} utm, count(*) as views
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       and coalesce(website_event.${column}, '') != ''
+       ${filterQuery}
++      ${cohortQuery}
+     group by 1
+     order by 2 desc
+     limit 50
+diff --git a/src/queries/sql/sessions/getSessionDataProperties.ts b/src/queries/sql/sessions/getSessionDataProperties.ts
+index 9b429f9b..a307509a 100644
+--- a/src/queries/sql/sessions/getSessionDataProperties.ts
++++ b/src/queries/sql/sessions/getSessionDataProperties.ts
+@@ -27,7 +27,6 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+         data_key as "propertyName",
+         count(distinct session_data.session_id) as "total"
+     from website_event 
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     join session_data 
+         on session_data.session_id = website_event.session_id
+@@ -35,6 +34,7 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+         ${filterQuery}
++        ${cohortQuery}
+     group by 1
+     order by 2 desc
+     limit 500
+diff --git a/src/queries/sql/sessions/getSessionDataValues.ts b/src/queries/sql/sessions/getSessionDataValues.ts
+index 5790141c..8da9e7b6 100644
+--- a/src/queries/sql/sessions/getSessionDataValues.ts
++++ b/src/queries/sql/sessions/getSessionDataValues.ts
+@@ -34,7 +34,6 @@ async function relationalQuery(
+       end as "value",
+       count(distinct session_data.session_id) as "total"
+     from website_event
+-    ${cohortQuery}
+     ${joinSessionQuery}
+     join session_data
+         on session_data.session_id = website_event.session_id
+@@ -43,6 +42,7 @@ async function relationalQuery(
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       and session_data.data_key = {{propertyName}}
+     ${filterQuery}
++    ${cohortQuery}
+     group by value
+     order by 2 desc
+     limit 100
+diff --git a/src/queries/sql/sessions/getSessionExpandedMetrics.ts b/src/queries/sql/sessions/getSessionExpandedMetrics.ts
+index f81acc76..6e5a9ddb 100644
+--- a/src/queries/sql/sessions/getSessionExpandedMetrics.ts
++++ b/src/queries/sql/sessions/getSessionExpandedMetrics.ts
+@@ -74,13 +74,13 @@ async function relationalQuery(
+         min(website_event.created_at) as "min_time",
+         max(website_event.created_at) as "max_time"
+       from website_event
+-      ${cohortQuery}
+       ${excludeBounceQuery}
+       ${joinSessionQuery}  
+       where website_event.website_id = {{websiteId::uuid}}
+         and website_event.created_at between {{startDate}} and {{endDate}}
+         and website_event.event_type NOT IN (2, 5)
+         ${filterQuery}
++        ${cohortQuery}
+       group by name, website_event.session_id, website_event.visit_id
+       ${includeCountry ? ', country' : ''}
+     ) as t
+diff --git a/src/queries/sql/sessions/getSessionMetrics.ts b/src/queries/sql/sessions/getSessionMetrics.ts
+index 2a5716bc..e58c3d46 100644
+--- a/src/queries/sql/sessions/getSessionMetrics.ts
++++ b/src/queries/sql/sessions/getSessionMetrics.ts
+@@ -52,7 +52,6 @@ async function relationalQuery(
+       count(distinct website_event.session_id) y
+       ${includeCountry ? ', country' : ''}
+     from website_event
+-    ${cohortQuery}
+     ${excludeBounceQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+@@ -60,6 +59,7 @@ async function relationalQuery(
+       and website_event.event_type NOT IN (2, 5)
+       and ${column} != ''
+     ${filterQuery}
++    ${cohortQuery}
+     group by 1
+     ${includeCountry ? ', 3' : ''}
+     order by 2 desc
+diff --git a/src/queries/sql/sessions/getSessionStats.ts b/src/queries/sql/sessions/getSessionStats.ts
+index 644dcf65..812aa730 100644
+--- a/src/queries/sql/sessions/getSessionStats.ts
++++ b/src/queries/sql/sessions/getSessionStats.ts
+@@ -28,13 +28,13 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       ${getDateSQL('website_event.created_at', unit, timezone)} x,
+       count(distinct website_event.session_id) y
+     from website_event
+-    ${cohortQuery}
+     ${excludeBounceQuery}
+     ${joinSessionQuery}
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       and website_event.event_type NOT IN (2, 5)
+       ${filterQuery}
++      ${cohortQuery}
+     group by 1
+     order by 1
+     `,
+diff --git a/src/queries/sql/sessions/getWebsiteSessionStats.ts b/src/queries/sql/sessions/getWebsiteSessionStats.ts
+index a4615ee4..670e7058 100644
+--- a/src/queries/sql/sessions/getWebsiteSessionStats.ts
++++ b/src/queries/sql/sessions/getWebsiteSessionStats.ts
+@@ -42,12 +42,12 @@ async function relationalQuery(
+       count(distinct session.country) as "countries",
+       sum(case when website_event.event_type = 2 then 1 else 0 end) as "events"
+     from website_event
+-    ${cohortQuery}
+     join session on website_event.session_id = session.session_id
+       and website_event.website_id = session.website_id
+     where website_event.website_id = {{websiteId::uuid}}
+       and website_event.created_at between {{startDate}} and {{endDate}}
+       ${filterQuery}
++      ${cohortQuery}
+     `,
+     queryParams,
+     FUNCTION_NAME,
+diff --git a/src/queries/sql/sessions/getWebsiteSessions.ts b/src/queries/sql/sessions/getWebsiteSessions.ts
+index c09bca8b..9b78f5e8 100644
+--- a/src/queries/sql/sessions/getWebsiteSessions.ts
++++ b/src/queries/sql/sessions/getWebsiteSessions.ts
+@@ -51,13 +51,13 @@ async function relationalQuery(websiteId: string, filters: QueryFilters) {
+       sum(case when website_event.event_type = 2 then 1 else 0 end) as "events",
+       ${getIsoDateSQL('max(website_event.created_at)')} as "createdAt"
+     from website_event 
+-    ${cohortQuery}
+     join session on session.session_id = website_event.session_id
+       and session.website_id = website_event.website_id
+     where website_event.website_id = {{websiteId::uuid}}
+     ${dateQuery}
+     ${filterQuery}
+     ${searchQuery}
++    ${cohortQuery}
+     group by session.session_id, 
+       session.website_id, 
+       website_event.hostname, 

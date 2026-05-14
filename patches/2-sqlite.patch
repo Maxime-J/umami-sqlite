@@ -1,0 +1,259 @@
+diff --git a/scripts/check-db.js b/scripts/check-db.js
+index 8c806cd8..e0fcd4c5 100644
+--- a/scripts/check-db.js
++++ b/scripts/check-db.js
+@@ -1,24 +1,19 @@
+ /* eslint-disable no-console */
+ import 'dotenv/config';
+ import { execSync } from 'node:child_process';
+-import { PrismaPg } from '@prisma/adapter-pg';
++import { PrismaSqlite } from 'prisma-adapter-sqlite';
+ import chalk from 'chalk';
+ import semver from 'semver';
+ import { PrismaClient } from '../generated/prisma/client.js';
+ 
+-const MIN_VERSION = '9.4.0';
+-
+ if (process.env.SKIP_DB_CHECK) {
+   console.log('Skipping database check.');
+   process.exit(0);
+ }
+ 
+-const url = new URL(process.env.DATABASE_URL);
++const url = process.env.DATABASE_URL;
+ 
+-const adapter = new PrismaPg(
+-  { connectionString: url.toString() },
+-  { schema: url.searchParams.get('schema') },
+-);
++const adapter = new PrismaSqlite({ url });
+ 
+ const prisma = new PrismaClient({ adapter });
+ 
+@@ -52,19 +47,6 @@ async function checkConnection() {
+   }
+ }
+ 
+-async function checkDatabaseVersion() {
+-  const query = await prisma.$queryRaw`select version() as version`;
+-  const version = semver.valid(semver.coerce(query[0].version));
+-
+-  if (semver.lt(version, MIN_VERSION)) {
+-    throw new Error(
+-      `Database version is not compatible. Please upgrade to ${MIN_VERSION} or greater.`,
+-    );
+-  }
+-
+-  success('Database version check successful.');
+-}
+-
+ async function applyMigration() {
+   if (!process.env.SKIP_DB_MIGRATION) {
+     console.log(execSync('prisma migrate deploy').toString());
+@@ -75,7 +57,7 @@ async function applyMigration() {
+ 
+ (async () => {
+   let err = false;
+-  for (const fn of [checkEnv, checkConnection, checkDatabaseVersion, applyMigration]) {
++  for (const fn of [checkEnv, checkConnection, applyMigration]) {
+     try {
+       await fn();
+     } catch (e) {
+diff --git a/scripts/seed/index.ts b/scripts/seed/index.ts
+index 2357ca4d..68253105 100644
+--- a/scripts/seed/index.ts
++++ b/scripts/seed/index.ts
+@@ -1,6 +1,6 @@
+ /* eslint-disable no-console */
+ import 'dotenv/config';
+-import { PrismaPg } from '@prisma/adapter-pg';
++import { PrismaSqlite } from 'prisma-adapter-sqlite';
+ import { type Prisma, PrismaClient } from '../../src/generated/prisma/client.js';
+ import { getSessionCountForDay } from './distributions/temporal.js';
+ import {
+@@ -59,7 +59,7 @@ async function batchInsertSessions(
+ ): Promise<void> {
+   for (let i = 0; i < data.length; i += BATCH_SIZE) {
+     const batch = data.slice(i, i + BATCH_SIZE);
+-    await prisma.session.createMany({ data: batch, skipDuplicates: true });
++    await prisma.session.createMany({ data: batch });
+     if (verbose) {
+       console.log(
+         `  Inserted ${Math.min(i + BATCH_SIZE, data.length)}/${data.length} session records`,
+@@ -75,7 +75,7 @@ async function batchInsertEvents(
+ ): Promise<void> {
+   for (let i = 0; i < data.length; i += BATCH_SIZE) {
+     const batch = data.slice(i, i + BATCH_SIZE);
+-    await prisma.websiteEvent.createMany({ data: batch, skipDuplicates: true });
++    await prisma.websiteEvent.createMany({ data: batch });
+     if (verbose) {
+       console.log(
+         `  Inserted ${Math.min(i + BATCH_SIZE, data.length)}/${data.length} event records`,
+@@ -91,7 +91,7 @@ async function batchInsertEventData(
+ ): Promise<void> {
+   for (let i = 0; i < data.length; i += BATCH_SIZE) {
+     const batch = data.slice(i, i + BATCH_SIZE);
+-    await prisma.eventData.createMany({ data: batch, skipDuplicates: true });
++    await prisma.eventData.createMany({ data: batch });
+     if (verbose) {
+       console.log(
+         `  Inserted ${Math.min(i + BATCH_SIZE, data.length)}/${data.length} eventData records`,
+@@ -107,7 +107,7 @@ async function batchInsertRevenue(
+ ): Promise<void> {
+   for (let i = 0; i < data.length; i += BATCH_SIZE) {
+     const batch = data.slice(i, i + BATCH_SIZE);
+-    await prisma.revenue.createMany({ data: batch, skipDuplicates: true });
++    await prisma.revenue.createMany({ data: batch });
+     if (verbose) {
+       console.log(
+         `  Inserted ${Math.min(i + BATCH_SIZE, data.length)}/${data.length} revenue records`,
+@@ -279,19 +279,7 @@ function createPrismaClient(): PrismaClient {
+     );
+   }
+ 
+-  let schema: string | undefined;
+-  try {
+-    const connectionUrl = new URL(url);
+-    schema = connectionUrl.searchParams.get('schema') ?? undefined;
+-  } catch {
+-    throw new Error(
+-      'DATABASE_URL is not a valid URL.\n' +
+-        'Expected format: postgresql://user:password@host:port/database\n' +
+-        `Received: ${url.substring(0, 30)}...`,
+-    );
+-  }
+-
+-  const adapter = new PrismaPg({ connectionString: url }, { schema });
++  const adapter = new PrismaSqlite({ url }, { timestampFormat: 'unixepoch-ms' });
+ 
+   return new PrismaClient({
+     adapter,
+diff --git a/src/lib/db.ts b/src/lib/db.ts
+index 7b6e8368..699977d4 100644
+--- a/src/lib/db.ts
++++ b/src/lib/db.ts
+@@ -1,5 +1,5 @@
+ export const PRISMA = 'prisma';
+-export const POSTGRESQL = 'postgresql';
++export const SQLITE = 'sqlite';
+ export const CLICKHOUSE = 'clickhouse';
+ export const KAFKA = 'kafka';
+ export const KAFKA_PRODUCER = 'kafka-producer';
+@@ -12,14 +12,20 @@ BigInt.prototype.toJSON = function () {
+ export function getDatabaseType(url = process.env.DATABASE_URL) {
+   const type = url?.split(':')[0];
+ 
+-  if (type === 'postgres') {
+-    return POSTGRESQL;
++  if (type === 'file') {
++    return SQLITE;
+   }
+ 
+   return type;
+ }
+ 
+ export async function runQuery(queries: any) {
++  const db = getDatabaseType();
++
++  if (db === SQLITE) {
++    return queries[PRISMA]();
++  }
++
+   if (process.env.CLICKHOUSE_URL) {
+     if (queries[KAFKA]) {
+       return queries[KAFKA]();
+@@ -27,12 +33,6 @@ export async function runQuery(queries: any) {
+ 
+     return queries[CLICKHOUSE]();
+   }
+-
+-  const db = getDatabaseType();
+-
+-  if (db === POSTGRESQL) {
+-    return queries[PRISMA]();
+-  }
+ }
+ 
+ export function notImplemented() {
+diff --git a/src/lib/prisma.ts b/src/lib/prisma.ts
+index c3b6aaca..5c892b45 100644
+--- a/src/lib/prisma.ts
++++ b/src/lib/prisma.ts
+@@ -1,6 +1,6 @@
+-import { PrismaPg } from '@prisma/adapter-pg';
+-import { readReplicas } from '@prisma/extension-read-replicas';
++import { join } from 'node:path';
+ import debug from 'debug';
++import { PrismaSqlite } from 'prisma-adapter-sqlite';
+ import { PrismaClient } from '@/generated/prisma/client';
+ import { DEFAULT_PAGE_SIZE, FILTER_COLUMNS, OPERATORS, SESSION_COLUMNS } from './constants';
+ import { filtersObjectToArray } from './params';
+@@ -361,58 +361,28 @@ function transaction(input: any, options?: any) {
+   return client.$transaction(input, options);
+ }
+ 
+-function getSchema() {
+-  const connectionUrl = new URL(process.env.DATABASE_URL);
+-
+-  return connectionUrl.searchParams.get('schema');
+-}
+-
+ function getClient() {
+   const url = process.env.DATABASE_URL;
+-  const replicaUrl = process.env.DATABASE_REPLICA_URL;
+   const logQuery = process.env.LOG_QUERY;
+-  const schema = getSchema();
+ 
+-  const baseAdapter = new PrismaPg({ connectionString: url }, { schema });
++  const adapter = new PrismaSqlite({
++    url,
++    extensions: [join(process.cwd(), 'db/sqlite/ext/regexp')]
++  }, { timestampFormat: 'unixepoch-ms' });
+ 
+-  const baseClient = new PrismaClient({
+-    adapter: baseAdapter,
++  const client = new PrismaClient({
++    adapter,
+     errorFormat: 'pretty',
+     ...(logQuery ? PRISMA_LOG_OPTIONS : {}),
+   });
+ 
+   if (logQuery) {
+-    baseClient.$on('query', log);
++    client.$on('query', log);
+   }
+ 
+-  if (!replicaUrl) {
+-    log('Prisma initialized');
+-    globalThis[PRISMA] ??= baseClient;
+-    return baseClient;
+-  }
+-
+-  const replicaAdapter = new PrismaPg({ connectionString: replicaUrl }, { schema });
+-
+-  const replicaClient = new PrismaClient({
+-    adapter: replicaAdapter,
+-    errorFormat: 'pretty',
+-    ...(logQuery ? PRISMA_LOG_OPTIONS : {}),
+-  });
+-
+-  if (logQuery) {
+-    replicaClient.$on('query', log);
+-  }
+-
+-  const extended = baseClient.$extends(
+-    readReplicas({
+-      replicas: [replicaClient],
+-    }),
+-  );
+-
+-  log('Prisma initialized (with replica)');
+-  globalThis[PRISMA] ??= extended;
+-
+-  return extended;
++  log('Prisma initialized');
++  globalThis[PRISMA] ??= client;
++  return client;
+ }
+ 
+ const client = (globalThis[PRISMA] || getClient()) as ReturnType<typeof getClient>;
