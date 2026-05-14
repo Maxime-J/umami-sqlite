@@ -32,7 +32,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release download --repo $GITHUB_REPOSITORY --pattern umami-sqlite.zip
-          unzip -q umami-sqlite.zip -d umami
+          unzip -q umami-sqlite.zip && rm umami-sqlite.zip
+          UMAMI_FOLDER=$(ls -d umami-*)
+          mv $UMAMI_FOLDER umami
 
       - name: Login to GitHub Container Registry
         uses: docker/login-action@v4
