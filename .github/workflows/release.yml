@@ -31,7 +31,7 @@ jobs:
           UMAMI_FOLDER=$(ls -d umami-*)
           cd $UMAMI_FOLDER
           rm -rf ./db ./prisma
-          rsync -a ../repository/create ./
+          rsync -a ../repository/create/ ./
           cp ../repository/examples/docker-compose.yml ./
           git apply ../repository/patches/*.patch
           cd ..
