@@ -3,7 +3,7 @@ run-name: Publish Docker image
 on:
   release:
     types: [released]
-  workflow-dispatch:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -76,7 +76,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     needs:
-      - build
+      - build-push
     steps:
       - name: Prepare
         run: echo "REGISTRY_IMAGE=ghcr.io/${GITHUB_REPOSITORY@L}" >> $GITHUB_ENV

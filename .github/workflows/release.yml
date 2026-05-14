@@ -19,7 +19,7 @@ jobs:
 
       - name: Get Umami version
         working-directory: repository
-        run: echo "UMAMI_VERSION=v${cat VERSION}" >> $GITHUB_ENV
+        run: echo "UMAMI_VERSION=v$(cat VERSION)" >> $GITHUB_ENV
 
       - name: Download Umami
         run: |
